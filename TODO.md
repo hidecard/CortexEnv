@@ -13,8 +13,8 @@
 - [x] Basic unit tests for core types and resource limits
 
 ## Phase 2: Virtual File System & Strong Isolation
-- [ ] Per-execution TempDir / temporary workspace with auto-cleanup
-- [ ] Path traversal protection + canonicalize
+- [x] Per-execution TempDir / temporary workspace with auto-cleanup
+- [x] Path traversal protection + canonicalize
 - [ ] chroot / pivot_root implementation
 - [ ] Mount namespace + OverlayFS or tmpfs
 - [ ] Network policy enforcement (default deny + optional whitelist)
@@ -24,13 +24,14 @@
 
 ## Phase 3: High-Performance API Server
 - [x] Axum server router skeleton (`/health`, `/v1/execute`)
-- [ ] Runnable server binary and graceful shutdown
-- [ ] POST `/v1/execute/async` + job ID
-- [ ] GET `/v1/executions/:id`
+- [x] Runnable server binary and graceful shutdown
+- [x] POST `/v1/execute/async` + job ID
+- [x] GET `/v1/executions/:id`
 - [ ] WebSocket `/v1/stream`
 - [ ] Warm worker pool + idle timeout
-- [ ] Request validation middleware, request IDs, and rate limiting
-- [ ] In-memory result storage (DashMap)
+- [x] Request validation middleware and request IDs
+- [x] Global API rate limiting (10 requests/second, burst 20)
+- [x] In-memory result storage (DashMap)
 
 ## Phase 4: Autonomous AI Agent & Self-Healing
 - [x] Provider-neutral `execute_code` tool trait

@@ -3,13 +3,19 @@ name = "sandbox-api"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+[[bin]]
+name = "cortexenv-server"
+path = "src/main.rs"
+
 [dependencies]
 sandbox-common = { path = "../sandbox-common" }
 sandbox-core = { path = "../sandbox-core" }
 sandbox-runtime = { path = "../sandbox-runtime" }
 axum = { version = "0.7", features = ["ws", "macros"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors", "limit"] }
+tower-http = { version = "0.6", features = ["trace", "cors", "limit", "request-id"] }
 hyper = "1"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

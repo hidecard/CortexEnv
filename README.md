@@ -2,7 +2,7 @@
 
 **CortexEnv** is a Rust workspace for building a secure, observable execution environment for AI-generated and user-submitted code. It is designed around a fail-closed security model: requests are validated first, network access is denied by default, resource limits are explicit, and each language runtime is isolated behind a focused adapter.
 
-> **Current status:** Phase 1 is implemented as a working foundation. WASM execution, shared request/result types, bounded limits, the Axum API router, the agent execution trait, and the CLI smoke test are available. Linux namespaces, cgroups, seccomp, capability dropping, filesystem isolation, and production authentication are planned hardening work and are not yet complete.
+> **Current status:** Phase 1 is implemented as a working foundation. WASM execution, shared request/result types, bounded limits, the Axum API server, asynchronous jobs, request IDs, bounded request bodies, the agent execution trait, and the CLI smoke test are available. Linux namespaces, cgroups, seccomp, capability dropping, filesystem isolation, and production authentication are planned hardening work and are not yet complete.
 
 Repository: <https://github.com/hidecard/CortexEnv>
 
@@ -43,9 +43,9 @@ flowchart LR
 | Component | Responsibility |
 | --- | --- |
 | `sandbox-common` | Shared request/result/configuration types, errors, language and network policy enums, and bounded resource validation. |
-| `sandbox-core` | Execution validation, tracing hook, and the fail-closed isolation plan that will later connect to namespaces, cgroups, seccomp, and capability controls. |
+| `sandbox-core` | Execution validation, tracing hook, fail-closed isolation plan, and per-execution temporary workspaces with traversal-safe path resolution. |
 | `sandbox-runtime` | Runtime dispatch and Wasmtime WASM execution. JavaScript and Python adapters are staged for later phases. |
-| `sandbox-api` | Axum router with `GET /health` and `POST /v1/execute`. |
+| `sandbox-api` | Axum router and server with `GET /health`, synchronous `POST /v1/execute`, asynchronous `POST /v1/execute/async`, and `GET /v1/executions/:id`. |
 | `sandbox-agent` | Provider-neutral async `ExecuteCode` trait for AI agents and future self-healing loops. |
 | `sandbox-cli` | Local command-line runner, distributed as the `cortexenv` executable. |
 | `CortexEnv` root crate | Workspace marker and project metadata. |
@@ -105,10 +105,14 @@ cargo run -p sandbox-cli --bin cortexenv -- --file /tmp/empty.wasm.hex --timeout
 
 ## API usage
 
-`sandbox-api` currently exposes a router constructor rather than a standalone server binary. The available routes are:
+`sandbox-api` exposes both a router and the `cortexenv-server` binary. Start the server with `cargo run -p sandbox-api --bin cortexenv-server`; it binds to `127.0.0.1:8080` by default, or to the `CORTEXENV_BIND` environment variable. Ctrl-C triggers graceful shutdown. The available routes are:
 
 - `GET /health` returns `ok`.
 - `POST /v1/execute` accepts a JSON `ExecutionRequest` and returns an `ExecutionResult` or a `400` error.
+- `POST /v1/execute/async` validates the request, returns `202 Accepted` with the request UUID, and runs the job in the background.
+- `GET /v1/executions/:id` returns `running`, `completed`, or `failed` status from the in-memory store; unknown IDs return `404`.
+
+Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20; per-key quotas and authentication remain future hardening work.
 
 A request shape is:
 
@@ -200,10 +204,10 @@ CortexEnv intentionally does not claim to be a production hostile-code boundary 
 - PID, mount, network, UTS, IPC, and user namespaces
 - cgroup CPU, memory, process, and file-descriptor enforcement
 - seccomp syscall filtering and capability dropping
-- temporary per-execution filesystems, traversal protection, and cleanup
+- full integration of temporary workspaces with each runtime, plus filesystem isolation
 - rootless operation and loopback-only network policy enforcement
 - process supervision, hard kill on timeout, and output backpressure
-- API key/JWT authentication, quotas, rate limiting, and tenant isolation
+- API key/JWT authentication, per-key quotas, and tenant isolation
 - Prometheus/OpenTelemetry instrumentation and production deployment images
 
 Never execute untrusted hostile code with elevated privileges using the current Phase 1 implementation. Treat the current `IsolationPlan` as a design boundary and validation layer, not as proof that the operating-system isolation controls are already active.
