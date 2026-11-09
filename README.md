@@ -148,8 +148,15 @@ cargo run -p sandbox-cli --bin cortexenv -- --file /tmp/empty.wasm.hex --timeout
 - `POST /v1/execute` accepts a JSON `ExecutionRequest` and returns an `ExecutionResult` or a `400` error.
 - `POST /v1/execute/async` validates the request, returns `202 Accepted` with the request UUID, and runs the job in the background.
 - `GET /v1/executions/:id` returns `running`, `completed`, or `failed` status from the in-memory store; unknown IDs return `404`.
+- `GET /v1/stream?id=<uuid>` upgrades to WebSocket and streams the job status until it is `completed` or `failed`.
 
 Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20; per-key quotas and authentication remain future hardening work.
+
+For example, after receiving an ID from `/v1/execute/async`, connect with a WebSocket client:
+
+```bash
+websocat "ws://127.0.0.1:8080/v1/stream?id=<execution-id>"
+```
 
 A request shape is:
 

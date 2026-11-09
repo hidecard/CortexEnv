@@ -3423,6 +3423,7 @@ dependencies = [
  "bytes",
  "chrono",
  "dashmap",
+ "futures-util",
  "hyper",
  "jsonwebtoken",
  "metrics 0.23.1",

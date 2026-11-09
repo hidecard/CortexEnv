@@ -27,7 +27,7 @@
 - [x] Runnable server binary and graceful shutdown
 - [x] POST `/v1/execute/async` + job ID
 - [x] GET `/v1/executions/:id`
-- [ ] WebSocket `/v1/stream`
+- [x] WebSocket `/v1/stream`
 - [ ] Warm worker pool + idle timeout
 - [x] Request validation middleware and request IDs
 - [x] Global API rate limiting (10 requests/second, burst 20)
@@ -47,7 +47,7 @@
 - [ ] Penetration testing checklist
 - [ ] Prometheus metrics and OpenTelemetry traces
 - [x] Multi-stage non-root Dockerfile and `docker-compose.yml`
-- [ ] Health checks + graceful shutdown
+- [x] Health checks + graceful shutdown
 - [ ] Architecture documentation
 
 ## Cross-Cutting

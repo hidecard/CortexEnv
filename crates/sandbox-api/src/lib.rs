@@ -2,16 +2,17 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 use axum::{
-    extract::{Path, State},
+    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Path, Query, State},
     http::{header::HeaderName, StatusCode},
     routing::{get, post},
     Json, Router,
 };
 use dashmap::DashMap;
+use futures_util::SinkExt;
 use sandbox_common::{ExecutionRequest, ExecutionResult};
 use sandbox_runtime::Runtime;
-use serde::Serialize;
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use std::{sync::Arc, time::Duration};
 use tower_http::{
     limit::RequestBodyLimitLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
@@ -57,6 +58,7 @@ pub fn router(runtime: Arc<Runtime>) -> Router {
         .route("/v1/execute", post(execute))
         .route("/v1/execute/async", post(execute_async))
         .route("/v1/executions/:id", get(get_execution))
+        .route("/v1/stream", get(stream))
         .layer(RequestBodyLimitLayer::new(MAX_REQUEST_BYTES))
         .layer(SetRequestIdLayer::new(
             REQUEST_ID_HEADER.clone(),
@@ -114,6 +116,47 @@ async fn get_execution(
         .map(|entry| Json(entry.value().clone()))
         .ok_or(StatusCode::NOT_FOUND)
 }
+
+#[derive(Debug, Deserialize)]
+struct StreamQuery {
+    id: Uuid,
+}
+
+async fn stream(
+    ws: WebSocketUpgrade,
+    Query(query): Query<StreamQuery>,
+    State(state): State<AppState>,
+) -> impl axum::response::IntoResponse {
+    ws.on_upgrade(move |socket| stream_execution(socket, state, query.id))
+}
+
+async fn stream_execution(mut socket: WebSocket, state: AppState, id: Uuid) {
+    loop {
+        let Some(status) = state.executions.get(&id).map(|entry| entry.value().clone()) else {
+            let _ = socket
+                .send(Message::Text(
+                    r#"{"status":"not_found"}"#.to_string().into(),
+                ))
+                .await;
+            let _ = socket.close().await;
+            return;
+        };
+
+        let terminal = matches!(&status, JobStatus::Completed { .. } | JobStatus::Failed { .. });
+        let payload = match serde_json::to_string(&status) {
+            Ok(payload) => payload,
+            Err(_) => return,
+        };
+        if socket.send(Message::Text(payload.into())).await.is_err() {
+            return;
+        }
+        if terminal {
+            let _ = socket.close().await;
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,6 +184,21 @@ mod tests {
                     .uri("/v1/execute/async")
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"language":"wasm","code":""}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn stream_requires_an_execution_id() {
+        let app = router(Arc::new(Runtime::default()));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/stream")
+                    .body(Body::empty())
                     .unwrap(),
             )
             .await
