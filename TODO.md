@@ -48,7 +48,8 @@
 - [x] Optional API key authentication (`CORTEXENV_API_KEY`)
 - [x] JWT support (optional)
 - [x] Per-authenticated-principal concurrent execution quota
-- [ ] Per-key request rate limit + durable usage quota
+- [x] In-memory per-authenticated-principal request rate limit
+- [ ] Durable usage quota accounting
 - [x] Penetration testing checklist (`docs/security-testing.md`)
 - [x] Prometheus-compatible metrics endpoint and execution counters
 - [ ] OpenTelemetry traces

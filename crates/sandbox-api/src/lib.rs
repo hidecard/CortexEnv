@@ -42,6 +42,13 @@ const DEFAULT_MAX_CONCURRENT_EXECUTIONS: usize = 4;
 const MAX_CONCURRENT_EXECUTIONS: usize = 1024;
 const DEFAULT_MAX_EXECUTIONS_PER_PRINCIPAL: usize = 2;
 const MAX_EXECUTIONS_PER_PRINCIPAL: usize = 1024;
+const DEFAULT_PRINCIPAL_REQUESTS_PER_SECOND: u32 = 5;
+const DEFAULT_PRINCIPAL_REQUEST_BURST: u32 = 10;
+const MAX_PRINCIPAL_REQUEST_RATE: u32 = 10_000;
+const DEFAULT_MAX_PRINCIPAL_BUCKETS: usize = 10_000;
+const PRINCIPAL_BUCKET_IDLE_TTL: Duration = Duration::from_secs(600);
+const PRINCIPAL_BUCKET_CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
+const MAX_PRINCIPAL_ID_BYTES: usize = 256;
 const DEFAULT_MAX_STORED_EXECUTIONS: usize = 1_000;
 const MAX_STORED_EXECUTIONS: usize = 100_000;
 
@@ -62,6 +69,8 @@ pub struct AppState {
     pub execution_slots: Arc<Semaphore>,
     /// Bounds concurrent executions for each authenticated principal.
     principal_execution_quota: Arc<PrincipalExecutionQuota>,
+    /// Bounds request rate for each authenticated principal.
+    principal_request_rate_limiter: Arc<PrincipalRequestRateLimiter>,
 }
 
 #[derive(Clone)]
@@ -126,6 +135,103 @@ impl Drop for PrincipalExecutionPermit {
             Arc::ptr_eq(current, &self.semaphore) && current.available_permits() == self.quota.limit
         }) {
             active.remove(&self.principal);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PrincipalRequestRateConfig {
+    requests_per_second: u32,
+    burst: u32,
+}
+
+struct RequestTokenBucket {
+    tokens: f64,
+    updated_at: Instant,
+    last_seen: Instant,
+}
+
+struct PrincipalRequestRateState {
+    buckets: HashMap<String, RequestTokenBucket>,
+    last_cleanup: Instant,
+}
+
+struct PrincipalRequestRateLimiter {
+    requests_per_second: u32,
+    burst: u32,
+    max_principals: usize,
+    idle_ttl: Duration,
+    cleanup_interval: Duration,
+    state: Mutex<PrincipalRequestRateState>,
+}
+
+impl PrincipalRequestRateLimiter {
+    fn new(
+        config: PrincipalRequestRateConfig,
+        max_principals: usize,
+        idle_ttl: Duration,
+        cleanup_interval: Duration,
+    ) -> Self {
+        let now = Instant::now();
+        Self {
+            requests_per_second: config
+                .requests_per_second
+                .clamp(1, MAX_PRINCIPAL_REQUEST_RATE),
+            burst: config.burst.clamp(1, MAX_PRINCIPAL_REQUEST_RATE),
+            max_principals: max_principals.max(1),
+            idle_ttl,
+            cleanup_interval,
+            state: Mutex::new(PrincipalRequestRateState {
+                buckets: HashMap::new(),
+                last_cleanup: now,
+            }),
+        }
+    }
+
+    fn check(&self, principal: &str) -> Result<(), u64> {
+        self.check_at(principal, Instant::now())
+    }
+
+    fn check_at(&self, principal: &str, now: Instant) -> Result<(), u64> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if now.saturating_duration_since(state.last_cleanup) >= self.cleanup_interval {
+            state.buckets.retain(|_, bucket| {
+                now.saturating_duration_since(bucket.last_seen) < self.idle_ttl
+            });
+            state.last_cleanup = now;
+        }
+
+        if !state.buckets.contains_key(principal) && state.buckets.len() >= self.max_principals {
+            return Err(self.idle_ttl.as_secs().max(1));
+        }
+
+        let bucket = state
+            .buckets
+            .entry(principal.to_owned())
+            .or_insert_with(|| RequestTokenBucket {
+                tokens: f64::from(self.burst),
+                updated_at: now,
+                last_seen: now,
+            });
+        let elapsed = now
+            .saturating_duration_since(bucket.updated_at)
+            .as_secs_f64();
+        bucket.tokens = (bucket.tokens + elapsed * f64::from(self.requests_per_second))
+            .min(f64::from(self.burst));
+        bucket.updated_at = now;
+        bucket.last_seen = now;
+
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
+            Ok(())
+        } else {
+            let retry_after = ((1.0 - bucket.tokens) / f64::from(self.requests_per_second))
+                .ceil()
+                .max(1.0) as u64;
+            Err(retry_after)
         }
     }
 }
@@ -277,6 +383,26 @@ fn configured_max_executions_per_principal() -> usize {
         .unwrap_or(DEFAULT_MAX_EXECUTIONS_PER_PRINCIPAL)
 }
 
+fn configured_principal_request_rate() -> PrincipalRequestRateConfig {
+    let read_limit = |name: &str, default| {
+        std::env::var(name)
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .filter(|value| (1..=MAX_PRINCIPAL_REQUEST_RATE).contains(value))
+            .unwrap_or(default)
+    };
+    PrincipalRequestRateConfig {
+        requests_per_second: read_limit(
+            "CORTEXENV_PER_KEY_REQUESTS_PER_SECOND",
+            DEFAULT_PRINCIPAL_REQUESTS_PER_SECOND,
+        ),
+        burst: read_limit(
+            "CORTEXENV_PER_KEY_REQUEST_BURST",
+            DEFAULT_PRINCIPAL_REQUEST_BURST,
+        ),
+    }
+}
+
 /// Build the API router with explicit authentication and execution capacity.
 ///
 /// The capacity is clamped to `1..=1024`. Requests arriving while every slot
@@ -306,6 +432,7 @@ pub fn router_with_auth_config(
         jwt_secret,
         max_concurrent_executions,
         configured_max_executions_per_principal(),
+        configured_principal_request_rate(),
     )
 }
 
@@ -315,7 +442,10 @@ fn router_with_auth_and_quota(
     jwt_secret: Option<String>,
     max_concurrent_executions: usize,
     max_executions_per_principal: usize,
+    principal_request_rate: PrincipalRequestRateConfig,
 ) -> Router {
+    let api_key = api_key.filter(|secret| !secret.trim().is_empty());
+    let jwt_secret = jwt_secret.filter(|secret| !secret.trim().is_empty());
     let max_stored_executions = std::env::var("CORTEXENV_MAX_STORED_EXECUTIONS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -340,6 +470,12 @@ fn router_with_auth_and_quota(
         )),
         principal_execution_quota: Arc::new(PrincipalExecutionQuota::new(
             max_executions_per_principal,
+        )),
+        principal_request_rate_limiter: Arc::new(PrincipalRequestRateLimiter::new(
+            principal_request_rate,
+            DEFAULT_MAX_PRINCIPAL_BUCKETS,
+            PRINCIPAL_BUCKET_IDLE_TTL,
+            PRINCIPAL_BUCKET_CLEANUP_INTERVAL,
         )),
     };
     let rate_limit = GovernorConfigBuilder::default()
@@ -419,6 +555,19 @@ async fn authenticate(
             .into_response();
     }
 
+    if !exempt {
+        if let Some(principal) = principal.as_ref() {
+            if let Err(retry_after) = state.principal_request_rate_limiter.check(&principal.0) {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", retry_after.to_string())],
+                    "per-key request rate limit exceeded",
+                )
+                    .into_response();
+            }
+        }
+    }
+
     request.extensions_mut().insert(principal);
     next.run(request).await
 }
@@ -441,7 +590,10 @@ fn jwt_subject(token: &str, secret: &str) -> Option<String> {
     )
     .ok()
     .and_then(|data| {
-        (!data.claims.sub.trim().is_empty() && data.claims.exp > 0).then_some(data.claims.sub)
+        (!data.claims.sub.trim().is_empty()
+            && data.claims.sub.len() <= MAX_PRINCIPAL_ID_BYTES
+            && data.claims.exp > 0)
+            .then_some(data.claims.sub)
     })
 }
 
@@ -706,6 +858,15 @@ mod tests {
             metrics: Arc::new(ApiMetrics::default()),
             execution_slots: Arc::new(Semaphore::new(1)),
             principal_execution_quota: Arc::new(PrincipalExecutionQuota::new(1)),
+            principal_request_rate_limiter: Arc::new(PrincipalRequestRateLimiter::new(
+                PrincipalRequestRateConfig {
+                    requests_per_second: 10,
+                    burst: 10,
+                },
+                10,
+                Duration::from_secs(60),
+                Duration::from_secs(1),
+            )),
         };
         let _permit = acquire_execution_slot(&state).unwrap();
         let error = acquire_execution_slot(&state).unwrap_err();
@@ -731,6 +892,30 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_key("alice"));
         assert!(quota.acquire("alice").is_ok());
+    }
+
+    #[test]
+    fn principal_rate_limiter_refills_isolates_and_reclaims_bounded_buckets() {
+        let limiter = PrincipalRequestRateLimiter::new(
+            PrincipalRequestRateConfig {
+                requests_per_second: 1,
+                burst: 1,
+            },
+            1,
+            Duration::from_secs(10),
+            Duration::from_secs(1),
+        );
+        let start = Instant::now();
+
+        assert!(limiter.check_at("alice", start).is_ok());
+        assert_eq!(limiter.check_at("alice", start), Err(1));
+        assert_eq!(limiter.check_at("bob", start), Err(10));
+        assert!(limiter
+            .check_at("alice", start + Duration::from_secs(1))
+            .is_ok());
+        assert!(limiter
+            .check_at("bob", start + Duration::from_secs(12))
+            .is_ok());
     }
 
     #[test]
@@ -863,6 +1048,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blank_auth_secrets_do_not_enable_empty_credential_authentication() {
+        let app = router_with_auth_config(
+            Arc::new(Runtime::default()),
+            Some("   ".into()),
+            Some(String::new()),
+            1,
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/executions/{}", Uuid::new_v4()))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn jwt_auth_requires_hs256_subject_and_unexpired_expiry() {
         #[derive(Serialize)]
         struct Claims<'a> {
@@ -887,6 +1092,17 @@ mod tests {
             jwt_subject(&token(now + 3600), secret).as_deref(),
             Some("tester")
         );
+        let oversized_subject = "x".repeat(MAX_PRINCIPAL_ID_BYTES + 1);
+        let oversized_token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::new(Algorithm::HS256),
+            &Claims {
+                sub: &oversized_subject,
+                exp: now + 3600,
+            },
+            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+        assert!(jwt_subject(&oversized_token, secret).is_none());
         let app =
             router_with_auth_config(Arc::new(Runtime::default()), None, Some(secret.into()), 1);
         let job_path = format!("/v1/executions/{}", Uuid::new_v4());
@@ -919,6 +1135,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_rate_limit_is_per_jwt_subject_and_returns_retry_after() {
+        #[derive(Serialize)]
+        struct Claims<'a> {
+            sub: &'a str,
+            exp: u64,
+        }
+
+        let secret = "cortexenv-test-secret-that-is-at-least-32-bytes";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let token = |sub: &str| {
+            jsonwebtoken::encode(
+                &jsonwebtoken::Header::new(Algorithm::HS256),
+                &Claims {
+                    sub,
+                    exp: now + 3600,
+                },
+                &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+            )
+            .unwrap()
+        };
+        let app = router_with_auth_and_quota(
+            Arc::new(Runtime::default()),
+            None,
+            Some(secret.into()),
+            4,
+            4,
+            PrincipalRequestRateConfig {
+                requests_per_second: 1,
+                burst: 1,
+            },
+        );
+        let request = |sub: &str| {
+            Request::builder()
+                .uri(format!("/v1/executions/{}", Uuid::new_v4()))
+                .header("authorization", format!("Bearer {}", token(sub)))
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        let first = app.clone().oneshot(request("alice")).await.unwrap();
+        assert_eq!(first.status(), StatusCode::NOT_FOUND);
+        let limited = app.clone().oneshot(request("alice")).await.unwrap();
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(limited.headers()["retry-after"], "1");
+        let different_principal = app.oneshot(request("bob")).await.unwrap();
+        assert_eq!(different_principal.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn async_execution_quota_is_per_jwt_subject_and_releases_on_completion() {
         #[derive(Serialize)]
         struct Claims<'a> {
@@ -948,6 +1216,10 @@ mod tests {
             Some(secret.into()),
             4,
             1,
+            PrincipalRequestRateConfig {
+                requests_per_second: 100,
+                burst: 100,
+            },
         );
         let long_script = "const until = Date.now() + 1000; while (Date.now() < until) {}";
         let request = |sub: &str, code: &str| {
