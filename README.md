@@ -155,6 +155,8 @@ Every response includes an `x-request-id` UUID for correlation. Requests larger 
 
 Execution responses return actionable request-validation messages and sanitized runtime/server errors. Detailed runtime failures are recorded in server logs with the execution ID; host paths and internal engine diagnostics are not returned to clients.
 
+Completed async results are kept in a bounded in-memory history. `CORTEXENV_MAX_STORED_EXECUTIONS` sets the retained completed-job limit (default `1000`, accepted range `1`–`100000`); when full, the oldest completed result is evicted. Running jobs are never evicted.
+
 Set `CORTEXENV_API_KEY` to protect execution routes. `GET /health` remains public for container health checks. Clients can authenticate with either `Authorization: Bearer <key>` or `x-api-key: <key>`:
 
 ```bash

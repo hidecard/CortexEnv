@@ -17,9 +17,10 @@ use sandbox_common::{ExecutionRequest, ExecutionResult, SandboxError};
 use sandbox_runtime::Runtime;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::VecDeque,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::{Duration, Instant},
 };
@@ -38,6 +39,8 @@ const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 const DEFAULT_MAX_CONCURRENT_EXECUTIONS: usize = 4;
 const MAX_CONCURRENT_EXECUTIONS: usize = 1024;
+const DEFAULT_MAX_STORED_EXECUTIONS: usize = 1_000;
+const MAX_STORED_EXECUTIONS: usize = 100_000;
 
 /// State shared by API handlers.
 #[derive(Clone)]
@@ -45,13 +48,68 @@ pub struct AppState {
     /// Runtime dispatcher.
     pub runtime: Arc<Runtime>,
     /// In-memory asynchronous execution store.
-    pub executions: Arc<DashMap<Uuid, JobStatus>>,
+    pub executions: Arc<ExecutionStore>,
     /// Optional API key. When set, execution routes require authentication.
     pub api_key: Option<Arc<String>>,
     /// Prometheus-compatible process and execution metrics.
     pub metrics: Arc<ApiMetrics>,
     /// Bounds the number of executions admitted at once.
     pub execution_slots: Arc<Semaphore>,
+}
+
+/// In-memory async job store that bounds retained completed results.
+pub struct ExecutionStore {
+    jobs: DashMap<Uuid, JobStatus>,
+    completed_order: Mutex<VecDeque<Uuid>>,
+    max_completed: usize,
+}
+
+impl ExecutionStore {
+    /// Create a job store retaining between one and 100,000 completed jobs.
+    pub fn new(max_completed: usize) -> Self {
+        Self {
+            jobs: DashMap::new(),
+            completed_order: Mutex::new(VecDeque::new()),
+            max_completed: max_completed.clamp(1, MAX_STORED_EXECUTIONS),
+        }
+    }
+
+    fn insert_running(&self, id: Uuid) -> bool {
+        match self.jobs.entry(id) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(entry) => {
+                entry.insert(JobStatus::Running);
+                true
+            }
+        }
+    }
+
+    fn finish(&self, id: Uuid, status: JobStatus) {
+        self.jobs.insert(id, status);
+        let mut completed_order = self
+            .completed_order
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        completed_order.push_back(id);
+        while completed_order.len() > self.max_completed {
+            if let Some(expired_id) = completed_order.pop_front() {
+                let is_completed = self.jobs.get(&expired_id).is_some_and(|entry| {
+                    matches!(
+                        entry.value(),
+                        JobStatus::Completed { .. } | JobStatus::Failed { .. }
+                    )
+                });
+                if is_completed {
+                    self.jobs.remove(&expired_id);
+                }
+            }
+        }
+    }
+
+    /// Return a snapshot of a stored job status, if it has not been evicted.
+    pub fn get(&self, id: &Uuid) -> Option<JobStatus> {
+        self.jobs.get(id).map(|entry| entry.value().clone())
+    }
 }
 
 /// Prometheus-compatible API counters and execution timing totals.
@@ -135,9 +193,14 @@ pub fn router_with_config(
     api_key: Option<String>,
     max_concurrent_executions: usize,
 ) -> Router {
+    let max_stored_executions = std::env::var("CORTEXENV_MAX_STORED_EXECUTIONS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| (1..=MAX_STORED_EXECUTIONS).contains(value))
+        .unwrap_or(DEFAULT_MAX_STORED_EXECUTIONS);
     let state = AppState {
         runtime,
-        executions: Arc::new(DashMap::new()),
+        executions: Arc::new(ExecutionStore::new(max_stored_executions)),
         api_key: api_key.map(Arc::new),
         metrics: Arc::new(ApiMetrics::default()),
         execution_slots: Arc::new(Semaphore::new(
@@ -252,13 +315,8 @@ async fn execute_async(
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     let permit = acquire_execution_slot(&state)?;
     let id = request.id;
-    match state.executions.entry(id) {
-        Entry::Occupied(_) => {
-            return Err((StatusCode::CONFLICT, "execution ID already exists".into()));
-        }
-        Entry::Vacant(entry) => {
-            entry.insert(JobStatus::Running);
-        }
+    if !state.executions.insert_running(id) {
+        return Err((StatusCode::CONFLICT, "execution ID already exists".into()));
     }
     state.metrics.record_started();
     let runtime = state.runtime.clone();
@@ -286,7 +344,7 @@ async fn execute_async(
                 }
             }
         };
-        executions.insert(id, status);
+        executions.finish(id, status);
     });
     Ok((StatusCode::ACCEPTED, Json(id)))
 }
@@ -336,7 +394,7 @@ async fn get_execution(
     state
         .executions
         .get(&id)
-        .map(|entry| Json(entry.value().clone()))
+        .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
 }
 
@@ -355,7 +413,7 @@ async fn stream(
 
 async fn stream_execution(mut socket: WebSocket, state: AppState, id: Uuid) {
     loop {
-        let Some(status) = state.executions.get(&id).map(|entry| entry.value().clone()) else {
+        let Some(status) = state.executions.get(&id) else {
             let _ = socket
                 .send(Message::Text(
                     r#"{"status":"not_found"}"#.to_string().into(),
@@ -451,7 +509,7 @@ mod tests {
     async fn exhausted_execution_slots_fail_closed() {
         let state = AppState {
             runtime: Arc::new(Runtime::default()),
-            executions: Arc::new(DashMap::new()),
+            executions: Arc::new(ExecutionStore::new(1)),
             api_key: None,
             metrics: Arc::new(ApiMetrics::default()),
             execution_slots: Arc::new(Semaphore::new(1)),
@@ -460,6 +518,30 @@ mod tests {
         let error = acquire_execution_slot(&state).unwrap_err();
         assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error.1, "execution capacity is full");
+    }
+
+    #[test]
+    fn execution_store_evicts_oldest_completed_and_keeps_running_jobs() {
+        let store = ExecutionStore::new(2);
+        let active_id = Uuid::new_v4();
+        assert!(store.insert_running(active_id));
+
+        let completed_ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+        for id in completed_ids {
+            assert!(store.insert_running(id));
+            store.finish(
+                id,
+                JobStatus::Failed {
+                    error: "test failure".into(),
+                },
+            );
+        }
+
+        assert!(matches!(store.get(&active_id), Some(JobStatus::Running)));
+        assert!(store.get(&completed_ids[0]).is_none());
+        assert!(store.get(&completed_ids[1]).is_some());
+        assert!(store.get(&completed_ids[2]).is_some());
+        assert!(!store.insert_running(completed_ids[2]));
     }
 
     #[tokio::test]
