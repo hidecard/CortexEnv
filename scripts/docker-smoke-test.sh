@@ -3,6 +3,7 @@ set -euo pipefail
 
 container_name="${1:-cortexenv-smoke}"
 port="${2:-18080}"
+host="${SMOKE_HOST:-127.0.0.1}"
 cleanup() {
   docker rm -f "$container_name" >/dev/null 2>&1 || true
 }
@@ -13,7 +14,7 @@ docker run --detach --name "$container_name" --publish "${port}:8080" \
   cortexenv:ci >/dev/null
 
 for _ in $(seq 1 30); do
-  if curl --fail --silent "http://127.0.0.1:${port}/health" >/dev/null; then
+  if curl --fail --silent "http://${host}:${port}/health" >/dev/null; then
     echo "CortexEnv Docker health check passed"
     exit 0
   fi

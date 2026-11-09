@@ -101,6 +101,14 @@ Run the same health smoke test used by CI after building the image:
 bash scripts/docker-smoke-test.sh
 ```
 
+If Rust and Docker CLI are not installed on the host, run the smoke test from the included Docker test environment. It uses the host Docker daemon through `/var/run/docker.sock`, builds the image, starts a temporary container, checks `/health`, and removes the container automatically:
+
+```bash
+docker compose -f docker-compose.smoke.yml run --rm smoke-test
+```
+
+This setup is intended for Linux, macOS Docker Desktop, and Linux containers through WSL2. The Docker daemon must be running. Mounting the Docker socket gives the test environment permission to create containers, so use it only with this trusted repository. On Docker Desktop, enable Linux containers before running the command.
+
 Tagged releases publish `ghcr.io/hidecard/cortexenv:<tag>` and `ghcr.io/hidecard/cortexenv:latest`. The image is intended for the API server; the CLI executable remains available separately for local WASM smoke tests.
 
 ## CLI usage
