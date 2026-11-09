@@ -2,6 +2,11 @@
 name = "sandbox-cli"
 version = "0.1.0"
 edition = "2021"
+description = "CortexEnv command-line WebAssembly sandbox runner"
+
+[[bin]]
+name = "cortexenv"
+path = "src/main.rs"
 
 [dependencies]
 sandbox-common = { path = "../sandbox-common" }
@@ -17,3 +22,17 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
+
+[package.metadata.deb]
+name = "cortexenv"
+maintainer = "Sandbox Team"
+copyright = "2026, Sandbox Team"
+license-file = ["../../LICENSE", "0"]
+section = "utils"
+priority = "optional"
+depends = "$auto"
+extended-description = "CortexEnv command-line WebAssembly sandbox runner."
+assets = [
+    ["target/release/cortexenv", "usr/bin/cortexenv", "755"],
+    ["../../README.md", "usr/share/doc/cortexenv/README.md", "644"],
+]
