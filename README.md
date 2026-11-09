@@ -153,6 +153,8 @@ cargo run -p sandbox-cli --bin cortexenv -- --file /tmp/empty.wasm.hex --timeout
 
 Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20. Execution is additionally bounded by `CORTEXENV_MAX_CONCURRENT_EXECUTIONS` (default `4`, accepted range `1`–`1024`); when all execution slots are occupied, synchronous and asynchronous execution requests receive `503 Service Unavailable` instead of growing an unbounded background queue. Reusing an ID already in the async result store returns `409 Conflict` rather than overwriting the existing job.
 
+Execution responses return actionable request-validation messages and sanitized runtime/server errors. Detailed runtime failures are recorded in server logs with the execution ID; host paths and internal engine diagnostics are not returned to clients.
+
 Set `CORTEXENV_API_KEY` to protect execution routes. `GET /health` remains public for container health checks. Clients can authenticate with either `Authorization: Bearer <key>` or `x-api-key: <key>`:
 
 ```bash

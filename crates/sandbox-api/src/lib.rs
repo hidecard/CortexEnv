@@ -13,7 +13,7 @@ use axum::{
     Json, Router,
 };
 use dashmap::{mapref::entry::Entry, DashMap};
-use sandbox_common::{ExecutionRequest, ExecutionResult};
+use sandbox_common::{ExecutionRequest, ExecutionResult, SandboxError};
 use sandbox_runtime::Runtime;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -222,11 +222,11 @@ async fn execute(
     let _permit = acquire_execution_slot(&state)?;
     state.metrics.record_started();
     let started = Instant::now();
-    let result = state
-        .runtime
-        .execute(request)
-        .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()));
+    let request_id = request.id;
+    let result = state.runtime.execute(request).await.map_err(|error| {
+        tracing::warn!(request_id = %request_id, error = %error, "sandbox execution failed");
+        client_safe_error(&error)
+    });
     match &result {
         Ok(result) => state.metrics.record_result(result),
         Err(_) => {
@@ -274,6 +274,7 @@ async fn execute_async(
             }
             Err(error) => {
                 metrics.record_failure();
+                tracing::warn!(request_id = %id, error = %error, "async sandbox execution failed");
                 metrics
                     .execution_duration_ms_sum
                     .fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
@@ -281,13 +282,39 @@ async fn execute_async(
                     .execution_duration_ms_count
                     .fetch_add(1, Ordering::Relaxed);
                 JobStatus::Failed {
-                    error: error.to_string(),
+                    error: client_safe_error(&error).1,
                 }
             }
         };
         executions.insert(id, status);
     });
     Ok((StatusCode::ACCEPTED, Json(id)))
+}
+
+fn client_safe_error(error: &SandboxError) -> (StatusCode, String) {
+    match error {
+        SandboxError::InvalidRequest(message) => (
+            StatusCode::BAD_REQUEST,
+            format!("invalid request: {message}"),
+        ),
+        SandboxError::UnsupportedLanguage(language) => (
+            StatusCode::BAD_REQUEST,
+            format!("unsupported language: {language}"),
+        ),
+        SandboxError::ResourceLimit(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "resource limits could not be applied".into(),
+        ),
+        SandboxError::Timeout => (StatusCode::REQUEST_TIMEOUT, "execution timed out".into()),
+        SandboxError::Runtime(_) => (
+            StatusCode::BAD_REQUEST,
+            "the program could not be compiled or executed".into(),
+        ),
+        SandboxError::Isolation | SandboxError::Internal => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "execution failed due to a server error".into(),
+        ),
+    }
 }
 
 fn acquire_execution_slot(state: &AppState) -> Result<OwnedSemaphorePermit, (StatusCode, String)> {
@@ -433,6 +460,56 @@ mod tests {
         let error = acquire_execution_slot(&state).unwrap_err();
         assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error.1, "execution capacity is full");
+    }
+
+    #[tokio::test]
+    async fn runtime_errors_do_not_leak_internal_details() {
+        let app = router(Arc::new(Runtime::default()));
+        let request = ExecutionRequest {
+            id: Uuid::new_v4(),
+            language: sandbox_common::Language::Wasm,
+            code: "00".into(),
+            limits: Default::default(),
+            network: Default::default(),
+        };
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let message = String::from_utf8(body.to_vec()).unwrap();
+        assert!(message.contains("the program could not be compiled or executed"));
+        assert!(!message.contains("failed to parse"));
+    }
+
+    #[test]
+    fn internal_error_messages_are_generic_but_client_validation_stays_actionable() {
+        let (status, message) = client_safe_error(&SandboxError::Runtime(
+            "host path /srv/private/cortexenv".into(),
+        ));
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(message, "the program could not be compiled or executed");
+        assert!(!message.contains("/srv/private"));
+
+        let (status, message) = client_safe_error(&SandboxError::InvalidRequest(
+            "timeout_ms must be between 1 and 300000".into(),
+        ));
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            message,
+            "invalid request: timeout_ms must be between 1 and 300000"
+        );
     }
 
     #[tokio::test]

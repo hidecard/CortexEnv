@@ -58,7 +58,7 @@
 - [x] Observability dependency and tracing hooks from Phase 1
 - [ ] Multi-tenancy quota design
 - [ ] Rootless support
-- [ ] Comprehensive error messages without leaking host information
+- [x] Comprehensive error messages without leaking host information
 
 ## Distribution
 - [x] Cross-platform `cortexenv` binary name
