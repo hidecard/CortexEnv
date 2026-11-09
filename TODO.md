@@ -42,7 +42,7 @@
 - [ ] End-to-end self-healing test
 
 ## Phase 5: Security Hardening & Production
-- [ ] API key authentication
+- [x] Optional API key authentication (`CORTEXENV_API_KEY`)
 - [ ] JWT support (optional)
 - [ ] Per-key rate limit + quota
 - [ ] Penetration testing checklist

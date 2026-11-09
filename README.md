@@ -2,7 +2,7 @@
 
 **CortexEnv** is a Rust workspace for building a secure, observable execution environment for AI-generated and user-submitted code. It is designed around a fail-closed security model: requests are validated first, network access is denied by default, resource limits are explicit, and each language runtime is isolated behind a focused adapter.
 
-> **Current status:** Phase 1 is implemented as a working foundation. WASM execution, shared request/result types, bounded limits, the Axum API server, asynchronous jobs, request IDs, bounded request bodies, the agent execution trait, and the CLI smoke test are available. Linux namespaces, cgroups, seccomp, capability dropping, filesystem isolation, and production authentication are planned hardening work and are not yet complete.
+> **Current status:** Phase 1 is implemented as a working foundation. WASM execution, shared request/result types, bounded limits, the Axum API server, asynchronous jobs, request IDs, bounded request bodies, optional API-key authentication, the agent execution trait, and the CLI smoke test are available. Linux namespaces, cgroups, seccomp, capability dropping, filesystem isolation, JWT authentication, and per-key quotas are planned hardening work and are not yet complete.
 
 Repository: <https://github.com/hidecard/CortexEnv>
 
@@ -150,7 +150,16 @@ cargo run -p sandbox-cli --bin cortexenv -- --file /tmp/empty.wasm.hex --timeout
 - `GET /v1/executions/:id` returns `running`, `completed`, or `failed` status from the in-memory store; unknown IDs return `404`.
 - `GET /v1/stream?id=<uuid>` upgrades to WebSocket and streams the job status until it is `completed` or `failed`.
 
-Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20; per-key quotas and authentication remain future hardening work.
+Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20.
+
+Set `CORTEXENV_API_KEY` to protect execution routes. `GET /health` remains public for container health checks. Clients can authenticate with either `Authorization: Bearer <key>` or `x-api-key: <key>`:
+
+```bash
+CORTEXENV_API_KEY=change-me cargo run -p sandbox-api --bin cortexenv-server
+curl -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/v1/executions/<execution-id>
+```
+
+Per-key quotas, JWT, and tenant isolation remain future hardening work.
 
 For example, after receiving an ID from `/v1/execute/async`, connect with a WebSocket client:
 
@@ -257,7 +266,7 @@ CortexEnv intentionally does not claim to be a production hostile-code boundary 
 - full integration of temporary workspaces with each runtime, plus filesystem isolation
 - rootless operation and loopback-only network policy enforcement
 - host-process supervision, hard kill for non-WASM runtimes, and output backpressure
-- API key/JWT authentication, per-key quotas, and tenant isolation
+- JWT authentication, per-key quotas, and tenant isolation
 - Prometheus/OpenTelemetry instrumentation and production deployment images
 
 Never execute untrusted hostile code with elevated privileges using the current Phase 1 implementation. Treat the current `IsolationPlan` as a design boundary and validation layer, not as proof that the operating-system isolation controls are already active.

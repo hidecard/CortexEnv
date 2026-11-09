@@ -3,7 +3,9 @@
 #![warn(missing_docs)]
 use axum::{
     extract::{ws::{Message, WebSocket, WebSocketUpgrade}, Path, Query, State},
-    http::{header::HeaderName, StatusCode},
+    http::{header::HeaderName, Request, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -13,6 +15,7 @@ use sandbox_common::{ExecutionRequest, ExecutionResult};
 use sandbox_runtime::Runtime;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
+use subtle::ConstantTimeEq;
 use tower_http::{
     limit::RequestBodyLimitLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
@@ -30,6 +33,8 @@ pub struct AppState {
     pub runtime: Arc<Runtime>,
     /// In-memory asynchronous execution store.
     pub executions: Arc<DashMap<Uuid, JobStatus>>,
+    /// Optional API key. When set, execution routes require authentication.
+    pub api_key: Option<Arc<String>>,
 }
 /// State of an asynchronous execution.
 #[derive(Debug, Clone, Serialize)]
@@ -44,9 +49,15 @@ pub enum JobStatus {
 }
 /// Build the API router.
 pub fn router(runtime: Arc<Runtime>) -> Router {
+    router_with_api_key(runtime, std::env::var("CORTEXENV_API_KEY").ok())
+}
+
+/// Build the API router with an explicit optional API key.
+pub fn router_with_api_key(runtime: Arc<Runtime>, api_key: Option<String>) -> Router {
     let state = AppState {
         runtime,
         executions: Arc::new(DashMap::new()),
+        api_key: api_key.map(Arc::new),
     };
     let rate_limit = GovernorConfigBuilder::default()
         .per_second(10)
@@ -68,7 +79,47 @@ pub fn router(runtime: Arc<Runtime>) -> Router {
         .layer(GovernorLayer {
             config: Arc::new(rate_limit),
         })
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            authenticate,
+        ))
         .with_state(state)
+}
+
+async fn authenticate(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if request.uri().path() == "/health" || state.api_key.is_none() {
+        return next.run(request).await;
+    }
+
+    let expected = state.api_key.as_ref().expect("checked above");
+    let bearer = request
+        .headers()
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    let header_key = request
+        .headers()
+        .get("x-api-key")
+        .and_then(|value| value.to_str().ok());
+    let matches_key = |candidate: Option<&str>| {
+        candidate
+            .map(|value| expected.as_bytes().ct_eq(value.as_bytes()).into())
+            .unwrap_or(false)
+    };
+    if matches_key(bearer) || matches_key(header_key) {
+        next.run(request).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            [("www-authenticate", "Bearer")],
+            "unauthorized",
+        )
+            .into_response()
+    }
 }
 async fn health() -> &'static str {
     "ok"
@@ -204,5 +255,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn configured_api_key_protects_execution_routes() {
+        let app = router_with_api_key(Arc::new(Runtime::default()), Some("secret".into()));
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri("/v1/executions/invalid").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/executions/invalid")
+                    .header("authorization", "Bearer secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }
