@@ -145,13 +145,13 @@ cargo run -p sandbox-cli --bin cortexenv -- --file /tmp/empty.wasm.hex --timeout
 `sandbox-api` exposes both a router and the `cortexenv-server` binary. Start the server with `cargo run -p sandbox-api --bin cortexenv-server`; it binds to `127.0.0.1:8080` by default, or to the `CORTEXENV_BIND` environment variable. Ctrl-C triggers graceful shutdown. The available routes are:
 
 - `GET /health` returns `ok`.
-- `POST /v1/execute` accepts a JSON `ExecutionRequest` and returns an `ExecutionResult` or a `400` error.
-- `POST /v1/execute/async` validates the request, returns `202 Accepted` with the request UUID, and runs the job in the background.
+- `POST /v1/execute` accepts a JSON `ExecutionRequest` and returns an `ExecutionResult`, `400` for invalid input, or `503` when all execution slots are occupied.
+- `POST /v1/execute/async` validates the request, returns `202 Accepted` with the request UUID, and runs the job in the background; duplicate IDs return `409`, while full capacity returns `503`.
 - `GET /v1/executions/:id` returns `running`, `completed`, or `failed` status from the in-memory store; unknown IDs return `404`.
 - `GET /v1/stream?id=<uuid>` upgrades to WebSocket and streams the job status until it is `completed` or `failed`.
 - `GET /metrics` returns Prometheus text-format request, execution outcome, timeout, and duration counters.
 
-Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20.
+Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20. Execution is additionally bounded by `CORTEXENV_MAX_CONCURRENT_EXECUTIONS` (default `4`, accepted range `1`–`1024`); when all execution slots are occupied, synchronous and asynchronous execution requests receive `503 Service Unavailable` instead of growing an unbounded background queue. Reusing an ID already in the async result store returns `409 Conflict` rather than overwriting the existing job.
 
 Set `CORTEXENV_API_KEY` to protect execution routes. `GET /health` remains public for container health checks. Clients can authenticate with either `Authorization: Bearer <key>` or `x-api-key: <key>`:
 

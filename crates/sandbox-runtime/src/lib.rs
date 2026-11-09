@@ -66,11 +66,10 @@ impl Runtime {
 
         let worker_engine = self.wasm.clone();
         let worker_request = request.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            execute_wasm_sync(&worker_engine, &worker_request)
-        })
-        .await
-        .map_err(|error| SandboxError::Runtime(error.to_string()))?;
+        let result =
+            tokio::task::spawn_blocking(move || execute_wasm_sync(&worker_engine, &worker_request))
+                .await
+                .map_err(|error| SandboxError::Runtime(error.to_string()))?;
         timer.abort();
 
         if timed_out.load(Ordering::Acquire) {
@@ -85,9 +84,8 @@ fn execute_wasm_sync(
     request: &ExecutionRequest,
 ) -> Result<ExecutionResult, SandboxError> {
     let started = Instant::now();
-    let bytes = hex::decode(&request.code).map_err(|_| {
-        SandboxError::InvalidRequest("WASM code must be hex-encoded bytes".into())
-    })?;
+    let bytes = hex::decode(&request.code)
+        .map_err(|_| SandboxError::InvalidRequest("WASM code must be hex-encoded bytes".into()))?;
     let module = Module::new(engine, bytes).map_err(|e| SandboxError::Runtime(e.to_string()))?;
     let mut store = Store::new(engine, ());
     store.set_epoch_deadline(1);

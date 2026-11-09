@@ -67,7 +67,7 @@ impl CgroupV2 {
             write_value(&path.join("memory.max"), &limits.memory_bytes.to_string())?;
             write_value(&path.join("memory.swap.max"), "0")?;
             write_value(&path.join("pids.max"), &limits.process_count.to_string())?;
-            Ok(Self { path })
+            Ok(Self { path: path.clone() })
         })();
         if result.is_err() {
             let _ = fs::remove_dir(&path);
@@ -143,8 +143,6 @@ mod tests {
     #[test]
     fn cgroup_creation_fails_closed_without_v2_controller() {
         let root = tempdir().unwrap();
-        assert!(
-            CgroupV2::create(root.path(), Uuid::new_v4(), &ResourceLimits::default()).is_err()
-        );
+        assert!(CgroupV2::create(root.path(), Uuid::new_v4(), &ResourceLimits::default()).is_err());
     }
 }

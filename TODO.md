@@ -33,6 +33,7 @@
 - [ ] Warm worker pool + idle timeout
 - [x] Request validation middleware and request IDs
 - [x] Global API rate limiting (10 requests/second, burst 20)
+- [x] Bounded concurrent execution admission with overload responses and duplicate async ID protection
 - [x] In-memory result storage (DashMap)
 
 ## Phase 4: Autonomous AI Agent & Self-Healing

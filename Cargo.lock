@@ -3513,6 +3513,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "uuid",
  "wasi-common",
  "wasmtime 28.0.1",
 ]
@@ -4282,6 +4283,7 @@ dependencies = [
  "tower-service",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
