@@ -74,6 +74,35 @@ cargo test --workspace
 
 The test suite currently covers shared default policies, bounded resource validation, and the fail-closed network setting in the core isolation plan. The workspace also runs documentation tests for all crates.
 
+## Docker usage
+
+The repository includes a multi-stage, non-root Docker image for the API server. Build and run it locally:
+
+```bash
+docker build -t cortexenv:local .
+docker run --rm --name cortexenv \
+  --publish 8080:8080 \
+  --cap-drop=ALL \
+  --security-opt=no-new-privileges \
+  cortexenv:local
+```
+
+The container listens on `0.0.0.0:8080`, includes a Docker health check, and uses `/tmp` for temporary execution workspaces. For the easiest local setup, use Compose:
+
+```bash
+docker compose up --build
+curl http://127.0.0.1:8080/health
+docker compose down
+```
+
+Run the same health smoke test used by CI after building the image:
+
+```bash
+bash scripts/docker-smoke-test.sh
+```
+
+Tagged releases publish `ghcr.io/hidecard/cortexenv:<tag>` and `ghcr.io/hidecard/cortexenv:latest`. The image is intended for the API server; the CLI executable remains available separately for local WASM smoke tests.
+
 ## CLI usage
 
 The `cortexenv` CLI takes a file containing hexadecimal WASM bytes. This minimal empty module is enough to verify loading and execution:
@@ -195,7 +224,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The tag workflow builds `cortexenv-windows-x86_64.exe`, builds the Debian `amd64` package, and creates a GitHub Release with both files attached.
+The tag workflow builds `cortexenv-windows-x86_64.exe`, builds the Debian `amd64` package, publishes the Docker image to GHCR, and creates a GitHub Release with the Windows and Debian files attached. On ordinary pushes and pull requests, the CI workflow builds the Docker image and runs its `/health` smoke test; Windows CI uploads the `.exe` as a downloadable workflow artifact.
+
+To download the Windows executable from GitHub Actions, open the successful `Rust CI` or tagged release workflow run and download the `cortexenv-windows-x86_64` artifact. In PowerShell:
+
+```powershell
+.\cortexenv-windows-x86_64.exe --file .\empty.wasm.hex
+```
 
 ## Security model and limitations
 

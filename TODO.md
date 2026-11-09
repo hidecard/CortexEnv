@@ -46,7 +46,7 @@
 - [ ] Per-key rate limit + quota
 - [ ] Penetration testing checklist
 - [ ] Prometheus metrics and OpenTelemetry traces
-- [ ] Multi-stage non-root Dockerfile and `docker-compose.yml`
+- [x] Multi-stage non-root Dockerfile and `docker-compose.yml`
 - [ ] Health checks + graceful shutdown
 - [ ] Architecture documentation
 

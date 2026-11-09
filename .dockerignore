@@ -1,0 +1,9 @@
+.git
+.github
+target
+Dockerfile
+README.md
+TODO.md
+docker-compose.yml
+**/*.swp
+**/*.tmp
