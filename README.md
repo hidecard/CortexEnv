@@ -129,6 +129,27 @@ A request shape is:
 
 The `id` field is generated automatically when omitted. The language values are `wasm`, `javascript`, and `python`; only `wasm` is executable in the current phase.
 
+## GitHub Actions CI
+
+Every push to `main` and every pull request targeting `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on both Ubuntu and Windows.
+
+The Ubuntu job runs the complete workspace test because the sandbox isolation roadmap targets Linux namespaces, cgroups, seccomp, and capability controls. The Windows job runs formatting plus the portable `CortexEnv` and `sandbox-common` tests. This split is intentional: the current `sandbox-core` dependency set includes Linux-oriented isolation crates, so a full workspace build is not expected to be portable to Windows until platform-specific adapters are added.
+
+To run the same checks locally on Windows PowerShell after installing Rust stable:
+
+```powershell
+cargo fmt --all -- --check
+cargo test -p CortexEnv -p sandbox-common
+```
+
+To run the complete Linux-targeted test suite:
+
+```powershell
+cargo test --workspace
+```
+
+The second command is expected to be run on Linux or in a Linux environment such as WSL2. GitHub Actions is the authoritative Windows validation environment for this repository; the current development sandbox cannot boot a native Windows runner locally.
+
 ## Security model and limitations
 
 CortexEnv intentionally does not claim to be a production hostile-code boundary yet. The current implementation provides policy types and validation, but the following controls still need to be implemented and tested before production use:

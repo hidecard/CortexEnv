@@ -1,0 +1,49 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  format-and-test:
+    name: Format and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      # Linux runs the complete workspace because the planned isolation
+      # dependencies and runtime integrations target Linux.
+      - name: Test complete workspace on Linux
+        if: runner.os == 'Linux'
+        run: cargo test --workspace
+
+      # The current isolation dependencies are Linux-specific. Windows still
+      # validates the root crate and portable shared contract crate.
+      - name: Test portable crates on Windows
+        if: runner.os == 'Windows'
+        run: cargo test -p CortexEnv -p sandbox-common
