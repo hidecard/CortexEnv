@@ -35,7 +35,7 @@ flowchart LR
 2. `sandbox-common` rejects empty or oversized code and validates timeout, memory, process, file-descriptor, and output ceilings.
 3. `sandbox-core` creates an explicit isolation plan. The default plan is network-disabled and does not silently broaden permissions.
 4. `sandbox-runtime` dispatches to the selected runtime. WASM bytes are currently supplied as hexadecimal text and loaded into Wasmtime.
-5. The runtime invokes the module's `_start` export when present and returns a structured `ExecutionResult`.
+5. The runtime invokes the module's `_start` export when present, interrupts WASM execution at the request deadline, and returns a structured `ExecutionResult`.
 6. The API or CLI serializes the result as JSON for the caller.
 
 ## Workspace layout
@@ -256,7 +256,7 @@ CortexEnv intentionally does not claim to be a production hostile-code boundary 
 - seccomp syscall filtering and capability dropping
 - full integration of temporary workspaces with each runtime, plus filesystem isolation
 - rootless operation and loopback-only network policy enforcement
-- process supervision, hard kill on timeout, and output backpressure
+- host-process supervision, hard kill for non-WASM runtimes, and output backpressure
 - API key/JWT authentication, per-key quotas, and tenant isolation
 - Prometheus/OpenTelemetry instrumentation and production deployment images
 
