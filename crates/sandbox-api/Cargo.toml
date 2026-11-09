@@ -20,12 +20,12 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 dashmap = "5"
 bytes = "1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 anyhow = "1"
 thiserror = "1"
 metrics = "0.23"
 metrics-exporter-prometheus = "0.16"
-tower-governor = "0.4"
+tower_governor = "0.4"
 jsonwebtoken = "9"
 
 [dev-dependencies]
