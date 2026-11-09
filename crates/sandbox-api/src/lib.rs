@@ -14,7 +14,10 @@ use futures_util::SinkExt;
 use sandbox_common::{ExecutionRequest, ExecutionResult};
 use sandbox_runtime::Runtime;
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{atomic::{AtomicU64, Ordering}, Arc},
+    time::{Duration, Instant},
+};
 use subtle::ConstantTimeEq;
 use tower_http::{
     limit::RequestBodyLimitLayer,
@@ -35,6 +38,41 @@ pub struct AppState {
     pub executions: Arc<DashMap<Uuid, JobStatus>>,
     /// Optional API key. When set, execution routes require authentication.
     pub api_key: Option<Arc<String>>,
+    /// Prometheus-compatible process and execution metrics.
+    pub metrics: Arc<ApiMetrics>,
+}
+
+/// Prometheus-compatible API counters and execution timing totals.
+#[derive(Debug, Default)]
+pub struct ApiMetrics {
+    requests_total: AtomicU64,
+    executions_started_total: AtomicU64,
+    executions_completed_total: AtomicU64,
+    executions_failed_total: AtomicU64,
+    executions_timed_out_total: AtomicU64,
+    execution_duration_ms_sum: AtomicU64,
+    execution_duration_ms_count: AtomicU64,
+}
+
+impl ApiMetrics {
+    fn record_request(&self) { self.requests_total.fetch_add(1, Ordering::Relaxed); }
+    fn record_started(&self) { self.executions_started_total.fetch_add(1, Ordering::Relaxed); }
+    fn record_result(&self, result: &ExecutionResult) {
+        self.execution_duration_ms_sum.fetch_add(result.duration_ms, Ordering::Relaxed);
+        self.execution_duration_ms_count.fetch_add(1, Ordering::Relaxed);
+        if result.timed_out {
+            self.executions_timed_out_total.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.executions_completed_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    fn record_failure(&self) { self.executions_failed_total.fetch_add(1, Ordering::Relaxed); }
+    fn render(&self) -> String {
+        format!(
+            "# HELP cortexenv_api_requests_total Total API requests.\n# TYPE cortexenv_api_requests_total counter\ncortexenv_api_requests_total {}\n# HELP cortexenv_executions_started_total Total executions started.\n# TYPE cortexenv_executions_started_total counter\ncortexenv_executions_started_total {}\n# HELP cortexenv_executions_completed_total Total executions completed.\n# TYPE cortexenv_executions_completed_total counter\ncortexenv_executions_completed_total {}\n# HELP cortexenv_executions_failed_total Total executions that failed.\n# TYPE cortexenv_executions_failed_total counter\ncortexenv_executions_failed_total {}\n# HELP cortexenv_executions_timed_out_total Total executions that timed out.\n# TYPE cortexenv_executions_timed_out_total counter\ncortexenv_executions_timed_out_total {}\n# HELP cortexenv_execution_duration_ms_sum Sum of execution durations in milliseconds.\n# TYPE cortexenv_execution_duration_ms_sum counter\ncortexenv_execution_duration_ms_sum {}\n# HELP cortexenv_execution_duration_ms_count Number of completed execution duration observations.\n# TYPE cortexenv_execution_duration_ms_count counter\ncortexenv_execution_duration_ms_count {}\n",
+            self.requests_total.load(Ordering::Relaxed), self.executions_started_total.load(Ordering::Relaxed), self.executions_completed_total.load(Ordering::Relaxed), self.executions_failed_total.load(Ordering::Relaxed), self.executions_timed_out_total.load(Ordering::Relaxed), self.execution_duration_ms_sum.load(Ordering::Relaxed), self.execution_duration_ms_count.load(Ordering::Relaxed)
+        )
+    }
 }
 /// State of an asynchronous execution.
 #[derive(Debug, Clone, Serialize)]
@@ -58,6 +96,7 @@ pub fn router_with_api_key(runtime: Arc<Runtime>, api_key: Option<String>) -> Ro
         runtime,
         executions: Arc::new(DashMap::new()),
         api_key: api_key.map(Arc::new),
+        metrics: Arc::new(ApiMetrics::default()),
     };
     let rate_limit = GovernorConfigBuilder::default()
         .per_second(10)
@@ -66,6 +105,7 @@ pub fn router_with_api_key(runtime: Arc<Runtime>, api_key: Option<String>) -> Ro
         .expect("valid rate-limit configuration");
     Router::new()
         .route("/health", get(health))
+        .route("/metrics", get(metrics))
         .route("/v1/execute", post(execute))
         .route("/v1/execute/async", post(execute_async))
         .route("/v1/executions/:id", get(get_execution))
@@ -91,7 +131,8 @@ async fn authenticate(
     request: Request,
     next: Next,
 ) -> Response {
-    if request.uri().path() == "/health" || state.api_key.is_none() {
+    state.metrics.record_request();
+    if matches!(request.uri().path(), "/health" | "/metrics") || state.api_key.is_none() {
         return next.run(request).await;
     }
 
@@ -124,16 +165,29 @@ async fn authenticate(
 async fn health() -> &'static str {
     "ok"
 }
+async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    ([("content-type", "text/plain; version=0.0.4; charset=utf-8")], state.metrics.render())
+}
 async fn execute(
     State(state): State<AppState>,
     Json(request): Json<ExecutionRequest>,
 ) -> Result<Json<ExecutionResult>, (StatusCode, String)> {
-    state
+    state.metrics.record_started();
+    let started = Instant::now();
+    let result = state
         .runtime
         .execute(request)
         .await
-        .map(Json)
-        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()));
+    match &result {
+        Ok(result) => state.metrics.record_result(result),
+        Err(_) => {
+            state.metrics.record_failure();
+            state.metrics.execution_duration_ms_sum.fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            state.metrics.execution_duration_ms_count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    result.map(Json)
 }
 async fn execute_async(
     State(state): State<AppState>,
@@ -143,15 +197,28 @@ async fn execute_async(
         .validate()
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     let id = request.id;
+    state.metrics.record_started();
     state.executions.insert(id, JobStatus::Running);
     let runtime = state.runtime.clone();
     let executions = state.executions.clone();
+    let metrics = state.metrics.clone();
     tokio::spawn(async move {
+        let started = Instant::now();
         let status = match runtime.execute(request).await {
-            Ok(result) => JobStatus::Completed { result },
-            Err(error) => JobStatus::Failed {
-                error: error.to_string(),
-            },
+            Ok(result) => {
+                metrics.record_result(&result);
+                JobStatus::Completed { result }
+            }
+            Err(error) => {
+                metrics.record_failure();
+                metrics
+                    .execution_duration_ms_sum
+                    .fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+                metrics.execution_duration_ms_count.fetch_add(1, Ordering::Relaxed);
+                JobStatus::Failed {
+                    error: error.to_string(),
+                }
+            }
         };
         executions.insert(id, status);
     });
@@ -285,5 +352,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn metrics_route_is_public_and_prometheus_compatible() {
+        let app = router_with_api_key(Arc::new(Runtime::default()), Some("secret".into()));
+        let response = app
+            .oneshot(Request::builder().uri("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "text/plain; version=0.0.4; charset=utf-8");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8(body.to_vec()).unwrap().contains("cortexenv_api_requests_total"));
     }
 }

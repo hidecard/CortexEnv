@@ -149,6 +149,7 @@ cargo run -p sandbox-cli --bin cortexenv -- --file /tmp/empty.wasm.hex --timeout
 - `POST /v1/execute/async` validates the request, returns `202 Accepted` with the request UUID, and runs the job in the background.
 - `GET /v1/executions/:id` returns `running`, `completed`, or `failed` status from the in-memory store; unknown IDs return `404`.
 - `GET /v1/stream?id=<uuid>` upgrades to WebSocket and streams the job status until it is `completed` or `failed`.
+- `GET /metrics` returns Prometheus text-format request, execution outcome, timeout, and duration counters.
 
 Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20.
 
@@ -160,6 +161,8 @@ curl -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/v1/executions/<e
 ```
 
 Per-key quotas, JWT, and tenant isolation remain future hardening work.
+
+The `/metrics` endpoint is intentionally public for container and Prometheus scrapers, even when `CORTEXENV_API_KEY` is configured. It exports `cortexenv_api_requests_total`, execution outcome counters, and duration sum/count values. Keep the metrics port private or put it behind an authenticated reverse proxy when exposing the service outside a trusted network.
 
 For example, after receiving an ID from `/v1/execute/async`, connect with a WebSocket client:
 
