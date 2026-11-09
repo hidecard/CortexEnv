@@ -5,7 +5,8 @@
 - [x] `sandbox-common`: `ExecutionRequest`, `ExecutionResult`, `Language`, `NetworkPolicy`
 - [x] `sandbox-common`: error types, default configuration, and bounded resource validation
 - [x] `sandbox-core`: resource-limit validation and explicit fail-closed isolation plan
-- [ ] `sandbox-core`: privileged Linux namespaces/cgroups/seccomp/capability enforcement (reserved for hardening)
+- [x] `sandbox-core`: Linux cgroup v2 controller manager for memory/swap/pids limits
+- [ ] `sandbox-core`: privileged Linux namespaces/seccomp/capability enforcement in a child supervisor
 - [x] `sandbox-runtime`: WASM module loading and `_start` invocation with Wasmtime
 - [x] `sandbox-runtime`: enforce WASM wall-clock timeout with Wasmtime epoch interruption
 - [ ] `sandbox-runtime`: JavaScript support (`deno_core` adapter)
@@ -49,7 +50,7 @@
 - [ ] Prometheus metrics and OpenTelemetry traces
 - [x] Multi-stage non-root Dockerfile and `docker-compose.yml`
 - [x] Health checks + graceful shutdown
-- [ ] Architecture documentation
+- [x] Architecture documentation
 
 ## Cross-Cutting
 - [x] Observability dependency and tracing hooks from Phase 1

@@ -6,6 +6,10 @@ use std::{path::{Path, PathBuf}, time::Instant};
 use tempfile::{tempdir, TempDir};
 use tracing::debug;
 
+/// Linux-only cgroup v2 and child-supervisor isolation contracts.
+#[cfg(target_os = "linux")]
+pub mod linux;
+
 /// Resource limit validator and execution coordinator.
 #[derive(Debug, Clone, Default)]
 pub struct SandboxEngine;

@@ -275,6 +275,8 @@ Never execute untrusted hostile code with elevated privileges using the current 
 
 The roadmap is tracked in [`TODO.md`](TODO.md). The next recommended step is to implement a real Linux supervisor in `sandbox-core`: create a per-execution workspace, apply cgroup limits, configure namespaces and seccomp, drop capabilities, supervise the child process, and add integration tests for fork bombs, memory exhaustion, path traversal, syscall escape attempts, and network escape.
 
+The Linux isolation boundary and the currently implemented cgroup v2 foundation are documented in [`docs/linux-isolation.md`](docs/linux-isolation.md). The cgroup controller is fail-closed, but namespace and seccomp setup must still be wired into a dedicated child supervisor before hostile code is accepted in production.
+
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
