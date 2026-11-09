@@ -132,10 +132,9 @@ fn execute_sync(
     // If the async caller disappeared, there is no deadline request to service.
     let _ = handle_tx.send(isolate_handle);
 
-    runtime
-        .execute_script(
-            "<sandbox-console>",
-            r#"
+    let bootstrap_result = runtime.execute_script(
+        "<sandbox-console>",
+        r#"
             globalThis.console = Object.freeze({
               log: (...values) => Deno.core.ops.op_capture_output("stdout", values.map(String).join(" ") + "\n"),
               info: (...values) => Deno.core.ops.op_capture_output("stdout", values.map(String).join(" ") + "\n"),
@@ -144,10 +143,16 @@ fn execute_sync(
               error: (...values) => Deno.core.ops.op_capture_output("stderr", values.map(String).join(" ") + "\n")
             });
             "#,
-        )
-        .map_err(|error| SandboxError::Runtime(error.to_string()))?;
+    );
 
-    let script_result = runtime.execute_script("<sandbox-script>", request.code.clone());
+    let script_result = match bootstrap_result {
+        Ok(_) if !timed_out.load(Ordering::Acquire) => {
+            Some(runtime.execute_script("<sandbox-script>", request.code.clone()))
+        }
+        Ok(_) => None,
+        Err(_) if timed_out.load(Ordering::Acquire) => None,
+        Err(error) => return Err(SandboxError::Runtime(error.to_string())),
+    };
     let did_time_out = timed_out.load(Ordering::Acquire);
     let mut output = runtime
         .op_state()
@@ -160,7 +165,7 @@ fn execute_sync(
     let (exit_code, stderr) = if did_time_out {
         (None, output.stderr())
     } else {
-        match script_result {
+        match script_result.expect("non-timeout execution must have a script result") {
             Ok(_) => (Some(0), output.stderr()),
             Err(error) => {
                 output.push("stderr", &format!("{error}\n"));

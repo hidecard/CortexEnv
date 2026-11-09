@@ -146,26 +146,26 @@ cargo run -p sandbox-cli --bin cortexenv -- --file /tmp/empty.wasm.hex --timeout
 `sandbox-api` exposes both a router and the `cortexenv-server` binary. Start the server with `cargo run -p sandbox-api --bin cortexenv-server`; it binds to `127.0.0.1:8080` by default, or to the `CORTEXENV_BIND` environment variable. Ctrl-C triggers graceful shutdown. The available routes are:
 
 - `GET /health` returns `ok`.
-- `POST /v1/execute` accepts a JSON `ExecutionRequest` and returns an `ExecutionResult`, `400` for invalid input, or `503` when all execution slots are occupied.
-- `POST /v1/execute/async` validates the request, returns `202 Accepted` with the request UUID, and runs the job in the background; duplicate IDs return `409`, while full capacity returns `503`.
+- `POST /v1/execute` accepts a JSON `ExecutionRequest` and returns an `ExecutionResult`, `400` for invalid input, `429` when the authenticated principal's execution quota is full, or `503` when all global execution slots are occupied.
+- `POST /v1/execute/async` validates the request, returns `202 Accepted` with the request UUID, and runs the job in the background; duplicate IDs return `409`, per-principal quota exhaustion returns `429`, and full global capacity returns `503`.
 - `GET /v1/executions/:id` returns `running`, `completed`, or `failed` status from the in-memory store; unknown IDs return `404`.
 - `GET /v1/stream?id=<uuid>` upgrades to WebSocket and streams the job status until it is `completed` or `failed`.
 - `GET /metrics` returns Prometheus text-format request, execution outcome, timeout, and duration counters.
 
-Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20. Execution is additionally bounded by `CORTEXENV_MAX_CONCURRENT_EXECUTIONS` (default `4`, accepted range `1`–`1024`); when all execution slots are occupied, synchronous and asynchronous execution requests receive `503 Service Unavailable` instead of growing an unbounded background queue. Reusing an ID already in the async result store returns `409 Conflict` rather than overwriting the existing job.
+Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20. Execution is bounded globally by `CORTEXENV_MAX_CONCURRENT_EXECUTIONS` (default `4`, accepted range `1`–`1024`) and, when authentication is enabled, per authenticated principal by `CORTEXENV_MAX_EXECUTIONS_PER_KEY` (default `2`, accepted range `1`–`1024`). Exceeding the per-principal execution quota returns `429 Too Many Requests`; exhausting total server capacity returns `503 Service Unavailable`. These are concurrency quotas, not a per-key requests-per-second rate limit. Reusing an ID already in the async result store returns `409 Conflict` rather than overwriting the existing job.
 
 Execution responses return actionable request-validation messages and sanitized runtime/server errors. Detailed runtime failures are recorded in server logs with the execution ID; host paths and internal engine diagnostics are not returned to clients.
 
 Completed async results are kept in a bounded in-memory history. `CORTEXENV_MAX_STORED_EXECUTIONS` sets the retained completed-job limit (default `1000`, accepted range `1`–`100000`); when full, the oldest completed result is evicted. Running jobs are never evicted.
 
-Set `CORTEXENV_API_KEY` to protect execution routes with a static key, or set `CORTEXENV_JWT_SECRET` to enable JWT bearer authentication. JWTs must use HS256, include a non-empty `sub` claim and an unexpired `exp` claim, and the secret must be at least 32 bytes. If both settings are present, either valid credential is accepted. A configured but too-short JWT secret fails closed and rejects JWTs. `GET /health` remains public for container health checks. Clients can authenticate with either `Authorization: Bearer <key-or-token>` or `x-api-key: <static-key>`:
+Set `CORTEXENV_API_KEY` to protect execution routes with a static key, or set `CORTEXENV_JWT_SECRET` to enable JWT bearer authentication. JWTs must use HS256, include a non-empty `sub` claim and an unexpired `exp` claim, and the secret must be at least 32 bytes. If both settings are present, either valid credential is accepted. A configured but too-short JWT secret fails closed and rejects JWTs. `GET /health` remains public for container health checks. JWT quotas are keyed by the validated `sub`; the single configured static API key has its own shared quota identity. Clients can authenticate with either `Authorization: Bearer <key-or-token>` or `x-api-key: <static-key>`:
 
 ```bash
 CORTEXENV_API_KEY=change-me cargo run -p sandbox-api --bin cortexenv-server
 curl -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/v1/executions/<execution-id>
 ```
 
-Per-key quotas, JWT, and tenant isolation remain future hardening work.
+Per-key concurrent execution quotas are enforced in-process and active quota entries are reclaimed when work finishes. Per-key request-rate limits, durable quota accounting, and broader tenant isolation remain future hardening work.
 
 The `/metrics` endpoint is intentionally public for container and Prometheus scrapers, even when `CORTEXENV_API_KEY` is configured. It exports `cortexenv_api_requests_total`, execution outcome counters, and duration sum/count values. Keep the metrics port private or put it behind an authenticated reverse proxy when exposing the service outside a trusted network.
 

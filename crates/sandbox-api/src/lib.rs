@@ -4,7 +4,7 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path, Query, State,
+        Extension, Path, Query, State,
     },
     http::{header::HeaderName, Request, StatusCode},
     middleware::{self, Next},
@@ -18,7 +18,7 @@ use sandbox_common::{ExecutionRequest, ExecutionResult, SandboxError};
 use sandbox_runtime::Runtime;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -40,6 +40,8 @@ const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 const DEFAULT_MAX_CONCURRENT_EXECUTIONS: usize = 4;
 const MAX_CONCURRENT_EXECUTIONS: usize = 1024;
+const DEFAULT_MAX_EXECUTIONS_PER_PRINCIPAL: usize = 2;
+const MAX_EXECUTIONS_PER_PRINCIPAL: usize = 1024;
 const DEFAULT_MAX_STORED_EXECUTIONS: usize = 1_000;
 const MAX_STORED_EXECUTIONS: usize = 100_000;
 
@@ -58,6 +60,74 @@ pub struct AppState {
     pub metrics: Arc<ApiMetrics>,
     /// Bounds the number of executions admitted at once.
     pub execution_slots: Arc<Semaphore>,
+    /// Bounds concurrent executions for each authenticated principal.
+    principal_execution_quota: Arc<PrincipalExecutionQuota>,
+}
+
+#[derive(Clone)]
+struct PrincipalId(String);
+
+struct PrincipalExecutionQuota {
+    limit: usize,
+    active: Mutex<HashMap<String, Arc<Semaphore>>>,
+}
+
+impl PrincipalExecutionQuota {
+    fn new(limit: usize) -> Self {
+        Self {
+            limit: limit.clamp(1, MAX_EXECUTIONS_PER_PRINCIPAL),
+            active: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn acquire(
+        self: &Arc<Self>,
+        principal: &str,
+    ) -> Result<PrincipalExecutionPermit, (StatusCode, String)> {
+        let mut active = self
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let semaphore = active
+            .entry(principal.to_owned())
+            .or_insert_with(|| Arc::new(Semaphore::new(self.limit)))
+            .clone();
+        let permit = semaphore.clone().try_acquire_owned().map_err(|_| {
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                "per-principal execution quota is full".into(),
+            )
+        })?;
+        Ok(PrincipalExecutionPermit {
+            quota: Arc::clone(self),
+            principal: principal.to_owned(),
+            semaphore,
+            permit: Some(permit),
+        })
+    }
+}
+
+struct PrincipalExecutionPermit {
+    quota: Arc<PrincipalExecutionQuota>,
+    principal: String,
+    semaphore: Arc<Semaphore>,
+    permit: Option<OwnedSemaphorePermit>,
+}
+
+impl Drop for PrincipalExecutionPermit {
+    fn drop(&mut self) {
+        drop(self.permit.take());
+        let mut active = self
+            .quota
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if active.get(&self.principal).is_some_and(|current| {
+            Arc::ptr_eq(current, &self.semaphore) && current.available_permits() == self.quota.limit
+        }) {
+            active.remove(&self.principal);
+        }
+    }
 }
 
 /// In-memory async job store that bounds retained completed results.
@@ -199,6 +269,14 @@ fn configured_max_concurrent_executions() -> usize {
         .unwrap_or(DEFAULT_MAX_CONCURRENT_EXECUTIONS)
 }
 
+fn configured_max_executions_per_principal() -> usize {
+    std::env::var("CORTEXENV_MAX_EXECUTIONS_PER_KEY")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| (1..=MAX_EXECUTIONS_PER_PRINCIPAL).contains(value))
+        .unwrap_or(DEFAULT_MAX_EXECUTIONS_PER_PRINCIPAL)
+}
+
 /// Build the API router with explicit authentication and execution capacity.
 ///
 /// The capacity is clamped to `1..=1024`. Requests arriving while every slot
@@ -222,6 +300,22 @@ pub fn router_with_auth_config(
     jwt_secret: Option<String>,
     max_concurrent_executions: usize,
 ) -> Router {
+    router_with_auth_and_quota(
+        runtime,
+        api_key,
+        jwt_secret,
+        max_concurrent_executions,
+        configured_max_executions_per_principal(),
+    )
+}
+
+fn router_with_auth_and_quota(
+    runtime: Arc<Runtime>,
+    api_key: Option<String>,
+    jwt_secret: Option<String>,
+    max_concurrent_executions: usize,
+    max_executions_per_principal: usize,
+) -> Router {
     let max_stored_executions = std::env::var("CORTEXENV_MAX_STORED_EXECUTIONS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -243,6 +337,9 @@ pub fn router_with_auth_config(
         metrics: Arc::new(ApiMetrics::default()),
         execution_slots: Arc::new(Semaphore::new(
             max_concurrent_executions.clamp(1, MAX_CONCURRENT_EXECUTIONS),
+        )),
+        principal_execution_quota: Arc::new(PrincipalExecutionQuota::new(
+            max_executions_per_principal,
         )),
     };
     let rate_limit = GovernorConfigBuilder::default()
@@ -273,47 +370,57 @@ pub fn router_with_auth_config(
 
 async fn authenticate(
     State(state): State<AppState>,
-    request: Request<axum::body::Body>,
+    mut request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
     state.metrics.record_request();
-    if matches!(request.uri().path(), "/health" | "/metrics")
-        || (state.api_key.is_none() && state.jwt_secret.is_none())
-    {
-        return next.run(request).await;
-    }
-
-    let bearer = request
-        .headers()
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "));
-    let header_key = request
-        .headers()
-        .get("x-api-key")
-        .and_then(|value| value.to_str().ok());
-    let matches_key = |candidate: Option<&str>, expected: &str| {
-        candidate
-            .map(|value| expected.as_bytes().ct_eq(value.as_bytes()).into())
-            .unwrap_or(false)
-    };
-    let api_key_matches = state.api_key.as_ref().is_some_and(|expected| {
-        matches_key(bearer, expected.as_str()) || matches_key(header_key, expected.as_str())
-    });
-    let jwt_matches = match (bearer, state.jwt_secret.as_ref()) {
-        (Some(token), Some(secret)) => is_valid_jwt(token, secret.as_str()),
-        _ => false,
-    };
-    if api_key_matches || jwt_matches {
-        next.run(request).await
+    let exempt = matches!(request.uri().path(), "/health" | "/metrics");
+    let auth_configured = state.api_key.is_some() || state.jwt_secret.is_some();
+    let principal = if exempt || !auth_configured {
+        None
     } else {
-        (
+        let bearer = request
+            .headers()
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        let header_key = request
+            .headers()
+            .get("x-api-key")
+            .and_then(|value| value.to_str().ok());
+        let matches_key = |candidate: Option<&str>, expected: &str| {
+            candidate
+                .map(|value| expected.as_bytes().ct_eq(value.as_bytes()).into())
+                .unwrap_or(false)
+        };
+        let api_key_matches = state.api_key.as_ref().is_some_and(|expected| {
+            matches_key(bearer, expected.as_str()) || matches_key(header_key, expected.as_str())
+        });
+        if api_key_matches {
+            Some(PrincipalId("api-key".into()))
+        } else {
+            bearer
+                .and_then(|token| {
+                    state
+                        .jwt_secret
+                        .as_ref()
+                        .and_then(|secret| jwt_subject(token, secret))
+                })
+                .map(PrincipalId)
+        }
+    };
+
+    if auth_configured && !exempt && principal.is_none() {
+        return (
             StatusCode::UNAUTHORIZED,
             [("www-authenticate", "Bearer")],
             "unauthorized",
         )
-            .into_response()
+            .into_response();
     }
+
+    request.extensions_mut().insert(principal);
+    next.run(request).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -322,9 +429,9 @@ struct JwtClaims {
     exp: u64,
 }
 
-fn is_valid_jwt(token: &str, secret: &str) -> bool {
+fn jwt_subject(token: &str, secret: &str) -> Option<String> {
     if token.len() > 8 * 1024 || secret.as_bytes().len() < 32 {
-        return false;
+        return None;
     }
     let validation = Validation::new(Algorithm::HS256);
     decode::<JwtClaims>(
@@ -332,8 +439,10 @@ fn is_valid_jwt(token: &str, secret: &str) -> bool {
         &DecodingKey::from_secret(secret.as_bytes()),
         &validation,
     )
-    .map(|data| !data.claims.sub.trim().is_empty() && data.claims.exp > 0)
-    .unwrap_or(false)
+    .ok()
+    .and_then(|data| {
+        (!data.claims.sub.trim().is_empty() && data.claims.exp > 0).then_some(data.claims.sub)
+    })
 }
 
 async fn health() -> &'static str {
@@ -347,8 +456,10 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
 }
 async fn execute(
     State(state): State<AppState>,
+    Extension(principal): Extension<Option<PrincipalId>>,
     Json(request): Json<ExecutionRequest>,
 ) -> Result<Json<ExecutionResult>, (StatusCode, String)> {
+    let _principal_permit = acquire_principal_execution_slot(&state, principal.as_ref())?;
     let _permit = acquire_execution_slot(&state)?;
     state.metrics.record_started();
     let started = Instant::now();
@@ -375,11 +486,13 @@ async fn execute(
 }
 async fn execute_async(
     State(state): State<AppState>,
+    Extension(principal): Extension<Option<PrincipalId>>,
     Json(request): Json<ExecutionRequest>,
 ) -> Result<(StatusCode, Json<Uuid>), (StatusCode, String)> {
     request
         .validate()
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let principal_permit = acquire_principal_execution_slot(&state, principal.as_ref())?;
     let permit = acquire_execution_slot(&state)?;
     let id = request.id;
     if !state.executions.insert_running(id) {
@@ -390,6 +503,7 @@ async fn execute_async(
     let executions = state.executions.clone();
     let metrics = state.metrics.clone();
     tokio::spawn(async move {
+        let _principal_permit = principal_permit;
         let _permit = permit;
         let started = Instant::now();
         let status = match runtime.execute(request).await {
@@ -454,6 +568,16 @@ fn acquire_execution_slot(state: &AppState) -> Result<OwnedSemaphorePermit, (Sta
             )
         })
 }
+
+fn acquire_principal_execution_slot(
+    state: &AppState,
+    principal: Option<&PrincipalId>,
+) -> Result<Option<PrincipalExecutionPermit>, (StatusCode, String)> {
+    principal
+        .map(|principal| state.principal_execution_quota.acquire(&principal.0))
+        .transpose()
+}
+
 async fn get_execution(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
@@ -581,11 +705,32 @@ mod tests {
             jwt_secret: None,
             metrics: Arc::new(ApiMetrics::default()),
             execution_slots: Arc::new(Semaphore::new(1)),
+            principal_execution_quota: Arc::new(PrincipalExecutionQuota::new(1)),
         };
         let _permit = acquire_execution_slot(&state).unwrap();
         let error = acquire_execution_slot(&state).unwrap_err();
         assert_eq!(error.0, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error.1, "execution capacity is full");
+    }
+
+    #[test]
+    fn principal_execution_quota_isolated_and_reclaims_idle_entries() {
+        let quota = Arc::new(PrincipalExecutionQuota::new(1));
+        let alice = quota.acquire("alice").unwrap();
+        let rejected = match quota.acquire("alice") {
+            Err(error) => error,
+            Ok(_) => panic!("same-principal request must be rejected at quota"),
+        };
+        assert_eq!(rejected.0, StatusCode::TOO_MANY_REQUESTS);
+        assert!(quota.acquire("bob").is_ok());
+
+        drop(alice);
+        assert!(!quota
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key("alice"));
+        assert!(quota.acquire("alice").is_ok());
     }
 
     #[test]
@@ -738,6 +883,10 @@ mod tests {
             )
             .unwrap()
         };
+        assert_eq!(
+            jwt_subject(&token(now + 3600), secret).as_deref(),
+            Some("tester")
+        );
         let app =
             router_with_auth_config(Arc::new(Runtime::default()), None, Some(secret.into()), 1);
         let job_path = format!("/v1/executions/{}", Uuid::new_v4());
@@ -766,7 +915,88 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(expired.status(), StatusCode::UNAUTHORIZED);
-        assert!(!is_valid_jwt(&token(now + 3600), "too-short"));
+        assert!(jwt_subject(&token(now + 3600), "too-short").is_none());
+    }
+
+    #[tokio::test]
+    async fn async_execution_quota_is_per_jwt_subject_and_releases_on_completion() {
+        #[derive(Serialize)]
+        struct Claims<'a> {
+            sub: &'a str,
+            exp: u64,
+        }
+
+        let secret = "cortexenv-test-secret-that-is-at-least-32-bytes";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let token = |sub: &str| {
+            jsonwebtoken::encode(
+                &jsonwebtoken::Header::new(Algorithm::HS256),
+                &Claims {
+                    sub,
+                    exp: now + 3600,
+                },
+                &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+            )
+            .unwrap()
+        };
+        let app = router_with_auth_and_quota(
+            Arc::new(Runtime::default()),
+            None,
+            Some(secret.into()),
+            4,
+            1,
+        );
+        let long_script = "const until = Date.now() + 1000; while (Date.now() < until) {}";
+        let request = |sub: &str, code: &str| {
+            let request = ExecutionRequest {
+                id: Uuid::new_v4(),
+                language: sandbox_common::Language::JavaScript,
+                code: code.into(),
+                limits: sandbox_common::ResourceLimits {
+                    timeout_ms: 5000,
+                    ..Default::default()
+                },
+                network: sandbox_common::NetworkPolicy::Deny,
+            };
+            Request::builder()
+                .method("POST")
+                .uri("/v1/execute/async")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token(sub)))
+                .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                .unwrap()
+        };
+
+        let first = app
+            .clone()
+            .oneshot(request("alice", long_script))
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::ACCEPTED);
+
+        let same_principal = app
+            .clone()
+            .oneshot(request("alice", "console.log('must be rejected');"))
+            .await
+            .unwrap();
+        assert_eq!(same_principal.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        let different_principal = app
+            .clone()
+            .oneshot(request("bob", long_script))
+            .await
+            .unwrap();
+        assert_eq!(different_principal.status(), StatusCode::ACCEPTED);
+
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let after_completion = app
+            .oneshot(request("alice", "console.log('slot reclaimed');"))
+            .await
+            .unwrap();
+        assert_eq!(after_completion.status(), StatusCode::ACCEPTED);
     }
 
     #[tokio::test]
