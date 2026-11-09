@@ -46,7 +46,7 @@
 
 ## Phase 5: Security Hardening & Production
 - [x] Optional API key authentication (`CORTEXENV_API_KEY`)
-- [ ] JWT support (optional)
+- [x] JWT support (optional)
 - [ ] Per-key rate limit + quota
 - [x] Penetration testing checklist (`docs/security-testing.md`)
 - [x] Prometheus-compatible metrics endpoint and execution counters

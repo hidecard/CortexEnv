@@ -13,6 +13,7 @@ use axum::{
     Json, Router,
 };
 use dashmap::{mapref::entry::Entry, DashMap};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use sandbox_common::{ExecutionRequest, ExecutionResult, SandboxError};
 use sandbox_runtime::Runtime;
 use serde::{Deserialize, Serialize};
@@ -51,6 +52,8 @@ pub struct AppState {
     pub executions: Arc<ExecutionStore>,
     /// Optional API key. When set, execution routes require authentication.
     pub api_key: Option<Arc<String>>,
+    /// Optional HS256 JWT verification secret.
+    pub jwt_secret: Option<Arc<String>>,
     /// Prometheus-compatible process and execution metrics.
     pub metrics: Arc<ApiMetrics>,
     /// Bounds the number of executions admitted at once.
@@ -170,17 +173,30 @@ pub enum JobStatus {
 }
 /// Build the API router.
 pub fn router(runtime: Arc<Runtime>) -> Router {
-    router_with_api_key(runtime, std::env::var("CORTEXENV_API_KEY").ok())
+    router_with_auth_config(
+        runtime,
+        std::env::var("CORTEXENV_API_KEY").ok(),
+        std::env::var("CORTEXENV_JWT_SECRET").ok(),
+        configured_max_concurrent_executions(),
+    )
 }
 
 /// Build the API router with an explicit optional API key.
 pub fn router_with_api_key(runtime: Arc<Runtime>, api_key: Option<String>) -> Router {
-    let max_concurrent_executions = std::env::var("CORTEXENV_MAX_CONCURRENT_EXECUTIONS")
+    router_with_auth_config(
+        runtime,
+        api_key,
+        None,
+        configured_max_concurrent_executions(),
+    )
+}
+
+fn configured_max_concurrent_executions() -> usize {
+    std::env::var("CORTEXENV_MAX_CONCURRENT_EXECUTIONS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| (1..=MAX_CONCURRENT_EXECUTIONS).contains(value))
-        .unwrap_or(DEFAULT_MAX_CONCURRENT_EXECUTIONS);
-    router_with_config(runtime, api_key, max_concurrent_executions)
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_EXECUTIONS)
 }
 
 /// Build the API router with explicit authentication and execution capacity.
@@ -193,15 +209,37 @@ pub fn router_with_config(
     api_key: Option<String>,
     max_concurrent_executions: usize,
 ) -> Router {
+    router_with_auth_config(runtime, api_key, None, max_concurrent_executions)
+}
+
+/// Build the API router with optional API-key/JWT authentication and capacity.
+///
+/// JWTs must use HS256, include a non-empty `sub` claim and a valid `exp` claim;
+/// the verification secret must contain at least 32 bytes.
+pub fn router_with_auth_config(
+    runtime: Arc<Runtime>,
+    api_key: Option<String>,
+    jwt_secret: Option<String>,
+    max_concurrent_executions: usize,
+) -> Router {
     let max_stored_executions = std::env::var("CORTEXENV_MAX_STORED_EXECUTIONS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| (1..=MAX_STORED_EXECUTIONS).contains(value))
         .unwrap_or(DEFAULT_MAX_STORED_EXECUTIONS);
+    if jwt_secret
+        .as_ref()
+        .is_some_and(|secret| secret.as_bytes().len() < 32)
+    {
+        tracing::error!(
+            "CORTEXENV_JWT_SECRET must contain at least 32 bytes; JWT authentication will reject all tokens"
+        );
+    }
     let state = AppState {
         runtime,
         executions: Arc::new(ExecutionStore::new(max_stored_executions)),
         api_key: api_key.map(Arc::new),
+        jwt_secret: jwt_secret.map(Arc::new),
         metrics: Arc::new(ApiMetrics::default()),
         execution_slots: Arc::new(Semaphore::new(
             max_concurrent_executions.clamp(1, MAX_CONCURRENT_EXECUTIONS),
@@ -239,11 +277,12 @@ async fn authenticate(
     next: Next,
 ) -> Response {
     state.metrics.record_request();
-    if matches!(request.uri().path(), "/health" | "/metrics") || state.api_key.is_none() {
+    if matches!(request.uri().path(), "/health" | "/metrics")
+        || (state.api_key.is_none() && state.jwt_secret.is_none())
+    {
         return next.run(request).await;
     }
 
-    let expected = state.api_key.as_ref().expect("checked above");
     let bearer = request
         .headers()
         .get("authorization")
@@ -253,12 +292,19 @@ async fn authenticate(
         .headers()
         .get("x-api-key")
         .and_then(|value| value.to_str().ok());
-    let matches_key = |candidate: Option<&str>| {
+    let matches_key = |candidate: Option<&str>, expected: &str| {
         candidate
             .map(|value| expected.as_bytes().ct_eq(value.as_bytes()).into())
             .unwrap_or(false)
     };
-    if matches_key(bearer) || matches_key(header_key) {
+    let api_key_matches = state.api_key.as_ref().is_some_and(|expected| {
+        matches_key(bearer, expected.as_str()) || matches_key(header_key, expected.as_str())
+    });
+    let jwt_matches = match (bearer, state.jwt_secret.as_ref()) {
+        (Some(token), Some(secret)) => is_valid_jwt(token, secret.as_str()),
+        _ => false,
+    };
+    if api_key_matches || jwt_matches {
         next.run(request).await
     } else {
         (
@@ -269,6 +315,27 @@ async fn authenticate(
             .into_response()
     }
 }
+
+#[derive(Debug, Deserialize)]
+struct JwtClaims {
+    sub: String,
+    exp: u64,
+}
+
+fn is_valid_jwt(token: &str, secret: &str) -> bool {
+    if token.len() > 8 * 1024 || secret.as_bytes().len() < 32 {
+        return false;
+    }
+    let validation = Validation::new(Algorithm::HS256);
+    decode::<JwtClaims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .map(|data| !data.claims.sub.trim().is_empty() && data.claims.exp > 0)
+    .unwrap_or(false)
+}
+
 async fn health() -> &'static str {
     "ok"
 }
@@ -511,6 +578,7 @@ mod tests {
             runtime: Arc::new(Runtime::default()),
             executions: Arc::new(ExecutionStore::new(1)),
             api_key: None,
+            jwt_secret: None,
             metrics: Arc::new(ApiMetrics::default()),
             execution_slots: Arc::new(Semaphore::new(1)),
         };
@@ -647,6 +715,58 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn jwt_auth_requires_hs256_subject_and_unexpired_expiry() {
+        #[derive(Serialize)]
+        struct Claims<'a> {
+            sub: &'a str,
+            exp: u64,
+        }
+
+        let secret = "cortexenv-test-secret-that-is-at-least-32-bytes";
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let token = |exp| {
+            jsonwebtoken::encode(
+                &jsonwebtoken::Header::new(Algorithm::HS256),
+                &Claims { sub: "tester", exp },
+                &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+            )
+            .unwrap()
+        };
+        let app =
+            router_with_auth_config(Arc::new(Runtime::default()), None, Some(secret.into()), 1);
+        let job_path = format!("/v1/executions/{}", Uuid::new_v4());
+
+        let valid = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(&job_path)
+                    .header("authorization", format!("Bearer {}", token(now + 3600)))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(valid.status(), StatusCode::NOT_FOUND);
+
+        let expired = app
+            .oneshot(
+                Request::builder()
+                    .uri(&job_path)
+                    .header("authorization", format!("Bearer {}", token(now - 3600)))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(expired.status(), StatusCode::UNAUTHORIZED);
+        assert!(!is_valid_jwt(&token(now + 3600), "too-short"));
     }
 
     #[tokio::test]

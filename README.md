@@ -157,7 +157,7 @@ Execution responses return actionable request-validation messages and sanitized 
 
 Completed async results are kept in a bounded in-memory history. `CORTEXENV_MAX_STORED_EXECUTIONS` sets the retained completed-job limit (default `1000`, accepted range `1`–`100000`); when full, the oldest completed result is evicted. Running jobs are never evicted.
 
-Set `CORTEXENV_API_KEY` to protect execution routes. `GET /health` remains public for container health checks. Clients can authenticate with either `Authorization: Bearer <key>` or `x-api-key: <key>`:
+Set `CORTEXENV_API_KEY` to protect execution routes with a static key, or set `CORTEXENV_JWT_SECRET` to enable JWT bearer authentication. JWTs must use HS256, include a non-empty `sub` claim and an unexpired `exp` claim, and the secret must be at least 32 bytes. If both settings are present, either valid credential is accepted. A configured but too-short JWT secret fails closed and rejects JWTs. `GET /health` remains public for container health checks. Clients can authenticate with either `Authorization: Bearer <key-or-token>` or `x-api-key: <static-key>`:
 
 ```bash
 CORTEXENV_API_KEY=change-me cargo run -p sandbox-api --bin cortexenv-server
