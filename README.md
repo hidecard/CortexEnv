@@ -267,6 +267,8 @@ To download the Windows executable from GitHub Actions, open the successful `Rus
 
 CortexEnv intentionally does not claim to be a production hostile-code boundary yet. The current implementation provides policy types and validation, but the following controls still need to be implemented and tested before production use:
 
+The [security testing checklist](docs/security-testing.md) separates current automated checks from tests blocked on the child supervisor. It is a testing plan, not penetration-test certification.
+
 - PID, mount, network, UTS, IPC, and user namespaces
 - cgroup CPU, memory, process, and file-descriptor enforcement
 - seccomp syscall filtering and capability dropping

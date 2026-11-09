@@ -48,7 +48,7 @@
 - [x] Optional API key authentication (`CORTEXENV_API_KEY`)
 - [ ] JWT support (optional)
 - [ ] Per-key rate limit + quota
-- [ ] Penetration testing checklist
+- [x] Penetration testing checklist (`docs/security-testing.md`)
 - [x] Prometheus-compatible metrics endpoint and execution counters
 - [ ] OpenTelemetry traces
 - [x] Multi-stage non-root Dockerfile and `docker-compose.yml`
