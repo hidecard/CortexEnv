@@ -18,7 +18,7 @@ RUN cargo build -p sandbox-api --bin cortexenv-server --release
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates wget \
+    && apt-get install -y --no-install-recommends ca-certificates wget python3-minimal \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --uid 10001 cortexenv
 

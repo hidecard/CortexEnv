@@ -1,4 +1,4 @@
-//! Language runtime adapters. WASM is implemented first; other runtimes fail closed.
+//! Language runtime adapters for WebAssembly, JavaScript, and Python.
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
@@ -13,6 +13,9 @@ use std::{
 };
 use tokio::time::sleep;
 use wasmtime::{Engine, Instance, Module, Store};
+
+mod javascript;
+mod python;
 
 /// Runtime dispatcher.
 pub struct Runtime {
@@ -36,7 +39,7 @@ impl Runtime {
             })
             .map_err(|e| SandboxError::Runtime(e.to_string()))
     }
-    /// Execute a request. WASM `code` is a hex-encoded module.
+    /// Execute a request. WASM `code` is a hex-encoded module; JavaScript and Python `code` is source text.
     pub async fn execute(
         &self,
         request: ExecutionRequest,
@@ -45,7 +48,8 @@ impl Runtime {
         log_execution_start(&request);
         match request.language {
             Language::Wasm => self.execute_wasm(request).await,
-            other => Err(SandboxError::UnsupportedLanguage(other)),
+            Language::JavaScript => javascript::execute(&request).await,
+            Language::Python => python::execute(&request).await,
         }
     }
 

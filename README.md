@@ -1,8 +1,8 @@
 # CortexEnv
 
-**CortexEnv** is a Rust workspace for building a secure, observable execution environment for AI-generated and user-submitted code. It is designed around a fail-closed security model: requests are validated first, network access is denied by default, resource limits are explicit, and each language runtime is isolated behind a focused adapter.
+**CortexEnv** is a Rust workspace for building an observable execution environment for AI-generated and user-submitted code. Requests are validated first, resource policies are explicit, and language runtimes are exposed through focused adapters. Operating-system isolation is still under development; do not use the current runtimes as a hostile-code security boundary.
 
-> **Current status:** Phase 1 is implemented as a working foundation. WASM execution, shared request/result types, bounded limits, the Axum API server, asynchronous jobs, request IDs, bounded request bodies, optional API-key authentication, the agent execution trait, and the CLI smoke test are available. Linux namespaces, cgroups, seccomp, capability dropping, filesystem isolation, JWT authentication, and per-key quotas are planned hardening work and are not yet complete.
+> **Current status:** WASM, JavaScript, and Python execution adapters are available, along with shared request/result types, bounded API admission and job history, the Axum server, request IDs, API-key/JWT authentication, and the CLI smoke test. JavaScript runs in `deno_core`; Python requires an installed interpreter and runs as a child process. Linux namespaces, seccomp, capability dropping, filesystem/network isolation, process-tree supervision, and per-key quotas are not complete. The adapters must not be treated as secure isolation from hostile code.
 
 Repository: <https://github.com/hidecard/CortexEnv>
 
@@ -10,7 +10,7 @@ Repository: <https://github.com/hidecard/CortexEnv>
 
 The project accepts an execution request containing a language, program payload, resource limits, and a network policy. The request is validated by `sandbox-common` and `sandbox-core`. The selected runtime then executes the program and returns a structured result containing an ID, exit status, stdout, stderr, timeout state, duration, and completion timestamp.
 
-In the current Phase 1 implementation, the working runtime is WebAssembly through Wasmtime. The CLI accepts a hexadecimal WASM module, while the API exposes a reusable Axum router for synchronous execution. JavaScript and Python are represented as staged runtime targets and currently fail closed with an unsupported-language error.
+The runtime supports WebAssembly through Wasmtime, JavaScript through `deno_core`, and Python through a child interpreter process. WASM requests contain hexadecimal module bytes; JavaScript and Python requests contain source text. The CLI remains a WASM-only smoke-test tool, while the API and Rust runtime dispatcher can execute all three languages. Python requires `python3` (or `python` on Windows); `CORTEXENV_PYTHON` can select another interpreter executable.
 
 ## Architecture
 
@@ -21,8 +21,8 @@ flowchart LR
     Common --> Core[sandbox-core\nresource checks + isolation plan]
     Core --> Dispatch[sandbox-runtime\nruntime dispatcher]
     Dispatch --> Wasm[Wasmtime\nWASM execution]
-    Dispatch -. staged .-> JS[deno_core\nJavaScript]
-    Dispatch -. staged .-> Py[isolated process\nPython]
+    Dispatch --> JS[deno_core\nJavaScript]
+    Dispatch --> Py[child process\nPython]
     Wasm --> Result[ExecutionResult]
     Result --> Client
     Agent[sandbox-agent\nExecuteCode trait] --> Dispatch
@@ -33,9 +33,9 @@ flowchart LR
 
 1. A client creates an `ExecutionRequest` with a UUID, language, source/module payload, resource limits, and network policy.
 2. `sandbox-common` rejects empty or oversized code and validates timeout, memory, process, file-descriptor, and output ceilings.
-3. `sandbox-core` creates an explicit isolation plan. The default plan is network-disabled and does not silently broaden permissions.
-4. `sandbox-runtime` dispatches to the selected runtime. WASM bytes are currently supplied as hexadecimal text and loaded into Wasmtime.
-5. The runtime invokes the module's `_start` export when present, interrupts WASM execution at the request deadline, and returns a structured `ExecutionResult`.
+3. `sandbox-core` validates and records an explicit isolation plan. OS-level network and filesystem enforcement is not complete; notably, Python `network: deny` is not currently enforced by the host.
+4. `sandbox-runtime` dispatches to the selected runtime. WASM bytes are supplied as hexadecimal text; JavaScript and Python are supplied as source text.
+5. The runtime captures bounded output and returns a structured `ExecutionResult`; WASM and the language adapters enforce execution deadlines, but Python's child process is not yet constrained by OS memory, network, or process-tree isolation.
 6. The API or CLI serializes the result as JSON for the caller.
 
 ## Workspace layout
@@ -44,7 +44,7 @@ flowchart LR
 | --- | --- |
 | `sandbox-common` | Shared request/result/configuration types, errors, language and network policy enums, and bounded resource validation. |
 | `sandbox-core` | Execution validation, tracing hook, fail-closed isolation plan, and per-execution temporary workspaces with traversal-safe path resolution. |
-| `sandbox-runtime` | Runtime dispatch and Wasmtime WASM execution. JavaScript and Python adapters are staged for later phases. |
+| `sandbox-runtime` | Runtime dispatch for Wasmtime, `deno_core` JavaScript, and child-process Python execution. |
 | `sandbox-api` | Axum router and server with `GET /health`, synchronous `POST /v1/execute`, asynchronous `POST /v1/execute/async`, and `GET /v1/executions/:id`. |
 | `sandbox-agent` | Provider-neutral async `ExecuteCode` trait for AI agents and future self-healing loops. |
 | `sandbox-cli` | Local command-line runner, distributed as the `cortexenv` executable. |
@@ -53,6 +53,7 @@ flowchart LR
 ## Requirements
 
 - Rust stable and Cargo
+- Python 3 is required only to execute Python requests; select a non-default interpreter with `CORTEXENV_PYTHON`
 - A Linux environment is recommended for the planned namespace/cgroup/seccomp work
 - No system OpenSSL development package is required for the current HTTP client configuration; `reqwest` uses `rustls-tls`
 
@@ -191,7 +192,19 @@ A request shape is:
 }
 ```
 
-The `id` field is generated automatically when omitted. The language values are `wasm`, `javascript`, and `python`; only `wasm` is executable in the current phase.
+The `id` field is generated automatically when omitted. The language values are `wasm`, `javascript`, and `python`; all are executable through the runtime/API. `code` is hexadecimal for WASM and source text for JavaScript/Python. `output_bytes` caps stdout and stderr separately and is limited to 16 MiB per stream. Python execution requires an installed interpreter. The adapters do not yet provide an OS-level hostile-code boundary.
+
+For example, JavaScript and Python source can be submitted through the same execution endpoint:
+
+```bash
+curl -sS http://127.0.0.1:8080/v1/execute \
+  -H 'content-type: application/json' \
+  -d '{"language":"javascript","code":"console.log(\u0027hello from JS\u0027)"}'
+
+curl -sS http://127.0.0.1:8080/v1/execute \
+  -H 'content-type: application/json' \
+  -d '{"language":"python","code":"print(\u0027hello from Python\u0027)"}'
+```
 
 ## GitHub Actions CI
 
@@ -269,14 +282,16 @@ CortexEnv intentionally does not claim to be a production hostile-code boundary 
 
 The [security testing checklist](docs/security-testing.md) separates current automated checks from tests blocked on the child supervisor. It is a testing plan, not penetration-test certification.
 
+JavaScript runs in an in-process V8 isolate with a minimal console-only op set; the V8 deadline can terminate synchronous script execution, but OS memory/process limits are not enforced. Python runs as a direct child with isolated interpreter startup, a temporary working directory, cleared inherited environment, a deadline, and bounded captured output. It can still access files and network available to the service account and can spawn descendants that are not killed with the parent. Do not execute hostile or untrusted JavaScript/Python in the current implementation.
+
 - PID, mount, network, UTS, IPC, and user namespaces
 - cgroup CPU, memory, process, and file-descriptor enforcement
 - seccomp syscall filtering and capability dropping
 - full integration of temporary workspaces with each runtime, plus filesystem isolation
 - rootless operation and loopback-only network policy enforcement
-- host-process supervision, hard kill for non-WASM runtimes, and output backpressure
-- JWT authentication, per-key quotas, and tenant isolation
-- Prometheus/OpenTelemetry instrumentation and production deployment images
+- process-tree supervision, OS-enforced kill/resource guarantees, and output backpressure
+- per-key quotas and tenant isolation
+- OpenTelemetry traces and production deployment hardening
 
 Never execute untrusted hostile code with elevated privileges using the current Phase 1 implementation. Treat the current `IsolationPlan` as a design boundary and validation layer, not as proof that the operating-system isolation controls are already active.
 

@@ -1,6 +1,6 @@
 # Linux isolation boundary
 
-CortexEnv currently executes WASM in the runtime process, so it must not call `unshare`, change the server's cgroups, or install a process-wide seccomp filter from an HTTP handler. Those operations would affect the API server itself. The safe architecture is a child supervisor: validate the request, fork/exec a dedicated child, apply isolation before the child runs untrusted code, attach the child to its cgroup, and supervise its timeout and output.
+CortexEnv currently executes WASM and JavaScript in the API process. The Python adapter starts a direct interpreter child with a temporary working directory, but does not apply namespaces, cgroups, seccomp, or other OS isolation; network access and descendant processes are not contained. The API must not call `unshare`, change the server's cgroups, or install a process-wide seccomp filter from an HTTP handler, because those operations would affect the API server itself. The safe architecture is a dedicated child supervisor: validate the request, spawn a child, apply isolation before it runs untrusted code, attach it to its cgroup, and supervise its timeout, output, and process tree.
 
 ## Implemented foundation
 

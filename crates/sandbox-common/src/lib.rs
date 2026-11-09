@@ -14,9 +14,9 @@ use uuid::Uuid;
 pub enum Language {
     /// WebAssembly.
     Wasm,
-    /// JavaScript (staged runtime).
+    /// JavaScript source executed by the deno_core adapter.
     JavaScript,
-    /// Python (staged runtime).
+    /// Python source executed by a child interpreter process.
     Python,
 }
 
@@ -90,6 +90,7 @@ impl ResourceLimits {
             || self.file_descriptors == 0
             || self.file_descriptors > 4096
             || self.output_bytes == 0
+            || self.output_bytes > 16 * 1024 * 1024
         {
             return Err(SandboxError::InvalidRequest(
                 "resource limits are outside the supported range".into(),
@@ -111,7 +112,7 @@ pub struct ExecutionRequest {
     pub id: Uuid,
     /// Runtime to invoke.
     pub language: Language,
-    /// Source text or base64-encoded WASM bytes.
+    /// JavaScript/Python source text or a hex-encoded WASM module.
     pub code: String,
     /// Resource ceilings.
     #[serde(default)]
@@ -208,5 +209,12 @@ mod tests {
         let mut l = ResourceLimits::default();
         l.timeout_ms = 0;
         assert!(l.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_excessive_output_limit() {
+        let mut limits = ResourceLimits::default();
+        limits.output_bytes = 16 * 1024 * 1024 + 1;
+        assert!(limits.validate().is_err());
     }
 }

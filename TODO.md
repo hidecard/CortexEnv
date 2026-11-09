@@ -9,8 +9,8 @@
 - [ ] `sandbox-core`: privileged Linux namespaces/seccomp/capability enforcement in a child supervisor
 - [x] `sandbox-runtime`: WASM module loading and `_start` invocation with Wasmtime
 - [x] `sandbox-runtime`: enforce WASM wall-clock timeout with Wasmtime epoch interruption
-- [ ] `sandbox-runtime`: JavaScript support (`deno_core` adapter)
-- [ ] `sandbox-runtime`: Python support (isolated process)
+- [x] `sandbox-runtime`: JavaScript support (`deno_core` adapter)
+- [x] `sandbox-runtime`: Python support (child process; OS isolation remains pending)
 - [x] `sandbox-cli`: execute a hex-encoded WASM module and print JSON result
 - [x] Basic unit tests for core types and resource limits
 

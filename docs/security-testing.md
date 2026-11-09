@@ -19,7 +19,7 @@ cargo fmt --all -- --check
 cargo test --workspace
 ```
 
-The current tests cover request validation, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key protection, request IDs, async duplicate IDs, bounded execution admission, bounded completed-job history, sanitized runtime errors, and WASM timeout interruption.
+The current tests cover request validation, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key/JWT protection, request IDs, async duplicate IDs, bounded execution admission/history, sanitized runtime errors, WASM timeout interruption, JavaScript console capture/error/deadline behavior, and Python stdout/stderr/exit status/deadline/output caps plus unsupported network-policy rejection. The Python deadline kills only the direct interpreter child; it does not kill descendants or enforce host network, filesystem, memory, or process limits.
 
 ## API negative and capacity checks
 
@@ -28,6 +28,8 @@ Use a disposable local instance and non-secret test credentials. Verify:
 - [ ] Requests to execution routes are rejected with `401` when `CORTEXENV_API_KEY` is configured and no valid key is supplied.
 - [ ] `/health` remains available without API credentials; keep `/metrics` on a private network or behind an authenticated proxy in deployed environments.
 - [ ] Malformed JSON, missing/invalid request fields, and malformed WASM produce client-safe errors without host paths or internal engine diagnostics.
+- [ ] JavaScript/Python syntax/runtime errors return the expected exit status and bounded stderr; verify no host paths or internal diagnostics are disclosed by the API.
+- [ ] Python requests for `loopback` or `allowlist` network access are rejected; do not interpret `network: deny` as host-enforced isolation.
 - [ ] A request body larger than 16 MiB is rejected before JSON parsing.
 - [ ] Sending requests beyond the configured global rate limit returns `429`; avoid using a public/shared service for this check.
 - [ ] With `CORTEXENV_MAX_CONCURRENT_EXECUTIONS=1`, hold one benign execution in progress and verify another request receives `503 Service Unavailable`.
