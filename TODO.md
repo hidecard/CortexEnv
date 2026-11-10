@@ -41,7 +41,7 @@
 ## Phase 4: Autonomous AI Agent & Self-Healing
 - [x] Provider-neutral `execute_code` tool trait
 - [x] Provider-neutral LLM client abstraction and OpenAI-compatible Chat Completions provider
-- [ ] ReAct / self-correction loop (max iterations)
+- [x] Bounded ReAct / self-correction loop (1–10 execution cap, network denied, bounded tool feedback)
 - [ ] Stateful sessions + optional persistent workspace
 - [ ] End-to-end self-healing test
 

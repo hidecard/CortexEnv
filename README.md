@@ -2,13 +2,13 @@
 
 **CortexEnv** is a Rust workspace for building an observable execution environment for AI-generated and user-submitted code. Requests are validated first, resource policies are explicit, and language runtimes are exposed through focused adapters. Operating-system isolation is still under development; do not use the current runtimes as a hostile-code security boundary.
 
-> **Current status:** WASM, JavaScript, and Python execution adapters are available, along with shared request/result types, bounded API admission and job history, request IDs, API-key/JWT authentication, in-memory per-principal request/concurrency quotas, principal-scoped async job results, a provider-neutral chat-model interface with an OpenAI-compatible client, and the CLI smoke test. JavaScript runs in `deno_core`; Python requires an installed interpreter and runs as a child process. Durable usage accounting, the ReAct/self-correction loop, and OpenTelemetry export remain pending. Linux namespaces, seccomp, capability dropping, filesystem/network isolation, and process-tree supervision are not enforced; the adapters must not be treated as secure isolation from hostile code.
+> **Current status:** WASM, JavaScript, and Python execution adapters are available, along with shared request/result types, bounded API admission and job history, request IDs, API-key/JWT authentication, in-memory per-principal request/concurrency quotas, principal-scoped async job results, a provider-neutral chat-model interface with an OpenAI-compatible client, a bounded ReAct code-execution loop, and the CLI smoke test. JavaScript runs in `deno_core`; Python requires an installed interpreter and runs as a child process. Durable usage accounting, stateful agent sessions, end-to-end self-healing coverage, and OpenTelemetry export remain pending. Linux namespaces, seccomp, capability dropping, filesystem/network isolation, and process-tree supervision are not enforced; the adapters must not be treated as secure isolation from hostile code.
 
 **Recent security progress:** authenticated async jobs are owned by their submitting principal. Status polling, WebSocket streaming, and cross-principal ID collisions do not disclose another principal's job; the static API key intentionally represents one shared principal. These ownership and quota records are in memory only and are lost on restart.
 
 **Recent runtime progress:** WASM deadlines now use a per-execution Wasmtime engine and repeated epoch ticks, preventing a deadline tick during module compilation from leaving an infinite guest loop running and preventing one execution's timeout from interrupting another.
 
-**Next roadmap priorities:** build a fail-closed child supervisor before claiming hostile-code isolation; then add durable/distributed quota accounting, OpenTelemetry export, and a bounded ReAct/self-correction loop. A warm worker pool also remains on the TODO roadmap.
+**Next roadmap priorities:** build a fail-closed child supervisor before claiming hostile-code isolation; then add durable/distributed quota accounting, OpenTelemetry export, stateful agent sessions, and end-to-end self-healing coverage. A warm worker pool also remains on the TODO roadmap.
 
 Repository: <https://github.com/hidecard/CortexEnv>
 
@@ -31,7 +31,7 @@ flowchart LR
     Dispatch --> Py[child process\nPython]
     Wasm --> Result[ExecutionResult]
     Result --> Client
-    Agent[sandbox-agent\nExecuteCode trait] --> Dispatch
+    Agent[sandbox-agent\nbounded ReAct + ExecuteCode] --> Dispatch
     API[sandbox-api\nAxum router] --> Dispatch
 ```
 
@@ -52,7 +52,7 @@ flowchart LR
 | `sandbox-core` | Execution validation, tracing hook, fail-closed isolation plan, and per-execution temporary workspaces with traversal-safe path resolution. |
 | `sandbox-runtime` | Runtime dispatch for Wasmtime, `deno_core` JavaScript, and child-process Python execution. |
 | `sandbox-api` | Axum router and server with `GET /health`, synchronous `POST /v1/execute`, asynchronous `POST /v1/execute/async`, and `GET /v1/executions/:id`. |
-| `sandbox-agent` | Provider-neutral `ExecuteCode` and `ChatModel` traits, an OpenAI-compatible chat-completions client, and future bounded self-healing loops. |
+| `sandbox-agent` | Provider-neutral `ExecuteCode` and `ChatModel` traits, an OpenAI-compatible chat-completions client, and a bounded ReAct execution loop. |
 | `sandbox-cli` | Local command-line runner, distributed as the `cortexenv` executable. |
 | `CortexEnv` root crate | Workspace marker and project metadata. |
 
@@ -61,21 +61,31 @@ flowchart LR
 `sandbox-agent` defines a provider-neutral `ChatModel` trait and ships an OpenAI Chat Completions-compatible HTTP client. Configure the API key in the host application rather than hard-coding it; for example:
 
 ```rust
-use sandbox_agent::llm::{ChatMessage, ChatModel, OpenAiCompatibleClient};
+use sandbox_agent::{
+    llm::OpenAiCompatibleClient,
+    react::{ReActAgent, ReActConfig},
+    Runtime, RuntimeTool,
+};
+use std::sync::Arc;
 
-async fn ask_model() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_agent() -> Result<(), Box<dyn std::error::Error>> {
     let model = OpenAiCompatibleClient::new(
         "https://api.openai.com/v1",
         std::env::var("CORTEXENV_LLM_API_KEY")?,
         "your-model-name",
     )?;
-    let answer = model.complete(&[ChatMessage::user("Return a short greeting.")]).await?;
-    println!("{}", answer.content);
+    let agent = ReActAgent::new(
+        model,
+        RuntimeTool::new(Arc::new(Runtime::default())),
+        ReActConfig::default(),
+    );
+    let outcome = agent.run("Write and run a short Python greeting.").await?;
+    println!("{}", outcome.answer);
     Ok(())
 }
 ```
 
-The adapter returns plain assistant text; the bounded ReAct/self-correction loop that would interpret model output and invoke `ExecuteCode` remains future work. Use an HTTPS endpoint for remote providers; HTTP is useful only for trusted local development endpoints.
+The adapter returns plain assistant text. `ReActAgent` interprets strict JSON `execute`/`final` actions, uses `ExecuteCode`, and can perform at most 10 sandbox executions per run (3 by default). Generated code uses the configured resource ceilings and `network: deny`; execution output is passed back as bounded, explicitly untrusted feedback. Stateful sessions and an end-to-end repair test remain future work. Use an HTTPS endpoint for remote providers; HTTP is useful only for trusted local development endpoints.
 
 ## Requirements
 

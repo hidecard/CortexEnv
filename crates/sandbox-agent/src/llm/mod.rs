@@ -81,6 +81,16 @@ pub trait ChatModel: Send + Sync {
     async fn complete(&self, messages: &[ChatMessage]) -> Result<ChatMessage, LlmError>;
 }
 
+#[async_trait]
+impl<T> ChatModel for std::sync::Arc<T>
+where
+    T: ChatModel + ?Sized,
+{
+    async fn complete(&self, messages: &[ChatMessage]) -> Result<ChatMessage, LlmError> {
+        (**self).complete(messages).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
