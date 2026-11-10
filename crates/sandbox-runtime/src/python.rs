@@ -290,6 +290,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn captures_stdout() {
         let result = execute(&request("print('hello from python')"))
@@ -300,6 +301,7 @@ mod tests {
         assert!(!result.timed_out);
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn captures_stderr_and_nonzero_exit() {
         let result = execute(&request(
@@ -312,6 +314,7 @@ mod tests {
         assert!(!result.timed_out);
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn terminates_child_on_timeout() {
         let mut request = request("import time; time.sleep(30)");
@@ -392,6 +395,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn truncates_each_output_stream() {
         let mut request =

@@ -48,7 +48,7 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo build -p sandbox-cli --bin cortexenv --release
 
-      - name: Test portable crates on Windows
+      - name: Test complete workspace on Windows
         if: runner.os == 'Windows'
         run: cargo test --workspace
 
