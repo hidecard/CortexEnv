@@ -2,7 +2,7 @@
 
 # Keep the container builder on current stable Rust: the locked dependency
 # graph includes crates using Cargo's stabilized 2024-edition support.
-FROM rust:latest-bookworm AS builder
+FROM rust:bookworm AS builder
 WORKDIR /app
 
 # Copy manifests first so dependency compilation can be cached by Docker.
