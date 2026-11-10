@@ -85,7 +85,7 @@ async fn run_agent() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-The adapter returns plain assistant text. `ReActAgent` interprets strict JSON `execute`/`final` actions, uses `ExecuteCode`, and can perform at most 10 sandbox executions per run (3 by default). Generated code uses the configured resource ceilings and `network: deny`; execution output is passed back as bounded, explicitly untrusted feedback. Stateful sessions and an end-to-end repair test remain future work. Use an HTTPS endpoint for remote providers; HTTP is useful only for trusted local development endpoints.
+The adapter returns plain assistant text. `ReActAgent` interprets strict JSON `execute`/`final` actions, uses `ExecuteCode`, and can perform at most 10 sandbox executions per run (3 by default). Generated requests use the configured ceilings and `network: deny` policy; execution output is passed back as bounded, explicitly untrusted feedback. **The host does not yet enforce complete OS-level network/resource isolation, so this agent is not a security boundary for hostile code.** Stateful sessions and an end-to-end repair test remain future work. Use an HTTPS endpoint for remote providers; HTTP is useful only for trusted local development endpoints.
 
 ## Requirements
 
