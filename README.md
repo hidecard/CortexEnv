@@ -2,7 +2,13 @@
 
 **CortexEnv** is a Rust workspace for building an observable execution environment for AI-generated and user-submitted code. Requests are validated first, resource policies are explicit, and language runtimes are exposed through focused adapters. Operating-system isolation is still under development; do not use the current runtimes as a hostile-code security boundary.
 
-> **Current status:** WASM, JavaScript, and Python execution adapters are available, along with shared request/result types, bounded API admission and job history, the Axum server, request IDs, API-key/JWT authentication, and the CLI smoke test. JavaScript runs in `deno_core`; Python requires an installed interpreter and runs as a child process. Linux namespaces, seccomp, capability dropping, filesystem/network isolation, process-tree supervision, and per-key quotas are not complete. The adapters must not be treated as secure isolation from hostile code.
+> **Current status:** WASM, JavaScript, and Python execution adapters are available, along with shared request/result types, bounded API admission and job history, request IDs, API-key/JWT authentication, in-memory per-principal request/concurrency quotas, principal-scoped async job results, a provider-neutral chat-model interface with an OpenAI-compatible client, and the CLI smoke test. JavaScript runs in `deno_core`; Python requires an installed interpreter and runs as a child process. Durable usage accounting, the ReAct/self-correction loop, and OpenTelemetry export remain pending. Linux namespaces, seccomp, capability dropping, filesystem/network isolation, and process-tree supervision are not enforced; the adapters must not be treated as secure isolation from hostile code.
+
+**Recent security progress:** authenticated async jobs are owned by their submitting principal. Status polling, WebSocket streaming, and cross-principal ID collisions do not disclose another principal's job; the static API key intentionally represents one shared principal. These ownership and quota records are in memory only and are lost on restart.
+
+**Recent runtime progress:** WASM deadlines now use a per-execution Wasmtime engine and repeated epoch ticks, preventing a deadline tick during module compilation from leaving an infinite guest loop running and preventing one execution's timeout from interrupting another.
+
+**Next roadmap priorities:** build a fail-closed child supervisor before claiming hostile-code isolation; then add durable/distributed quota accounting, OpenTelemetry export, and a bounded ReAct/self-correction loop. A warm worker pool also remains on the TODO roadmap.
 
 Repository: <https://github.com/hidecard/CortexEnv>
 
@@ -46,9 +52,30 @@ flowchart LR
 | `sandbox-core` | Execution validation, tracing hook, fail-closed isolation plan, and per-execution temporary workspaces with traversal-safe path resolution. |
 | `sandbox-runtime` | Runtime dispatch for Wasmtime, `deno_core` JavaScript, and child-process Python execution. |
 | `sandbox-api` | Axum router and server with `GET /health`, synchronous `POST /v1/execute`, asynchronous `POST /v1/execute/async`, and `GET /v1/executions/:id`. |
-| `sandbox-agent` | Provider-neutral async `ExecuteCode` trait for AI agents and future self-healing loops. |
+| `sandbox-agent` | Provider-neutral `ExecuteCode` and `ChatModel` traits, an OpenAI-compatible chat-completions client, and future bounded self-healing loops. |
 | `sandbox-cli` | Local command-line runner, distributed as the `cortexenv` executable. |
 | `CortexEnv` root crate | Workspace marker and project metadata. |
+
+## Language-model client
+
+`sandbox-agent` defines a provider-neutral `ChatModel` trait and ships an OpenAI Chat Completions-compatible HTTP client. Configure the API key in the host application rather than hard-coding it; for example:
+
+```rust
+use sandbox_agent::llm::{ChatMessage, ChatModel, OpenAiCompatibleClient};
+
+async fn ask_model() -> Result<(), Box<dyn std::error::Error>> {
+    let model = OpenAiCompatibleClient::new(
+        "https://api.openai.com/v1",
+        std::env::var("CORTEXENV_LLM_API_KEY")?,
+        "your-model-name",
+    )?;
+    let answer = model.complete(&[ChatMessage::user("Return a short greeting.")]).await?;
+    println!("{}", answer.content);
+    Ok(())
+}
+```
+
+The adapter returns plain assistant text; the bounded ReAct/self-correction loop that would interpret model output and invoke `ExecuteCode` remains future work. Use an HTTPS endpoint for remote providers; HTTP is useful only for trusted local development endpoints.
 
 ## Requirements
 
@@ -147,14 +174,14 @@ cargo run -p sandbox-cli --bin cortexenv -- --file /tmp/empty.wasm.hex --timeout
 
 - `GET /health` returns `ok`.
 - `POST /v1/execute` accepts a JSON `ExecutionRequest` and returns an `ExecutionResult`, `400` for invalid input, `429` when the authenticated principal's execution quota is full, or `503` when all global execution slots are occupied.
-- `POST /v1/execute/async` validates the request, returns `202 Accepted` with the request UUID, and runs the job in the background; duplicate IDs return `409`, per-principal quota exhaustion returns `429`, and full global capacity returns `503`.
-- `GET /v1/executions/:id` returns `running`, `completed`, or `failed` status from the in-memory store; unknown IDs return `404`, and authenticated-principal rate-limit hits return `429`.
-- `GET /v1/stream?id=<uuid>` upgrades to WebSocket and streams the job status until it is `completed` or `failed`; authenticated-principal rate-limit hits return `429` before the upgrade.
+- `POST /v1/execute/async` validates the request, returns `202 Accepted` with the request UUID, and runs the job in the background; reusing your own ID returns `409`, IDs belonging to another authenticated principal return `404`, per-principal quota exhaustion returns `429`, and full global capacity returns `503`.
+- `GET /v1/executions/:id` returns `running`, `completed`, or `failed` status from the in-memory store; unknown IDs and jobs owned by another authenticated principal both return `404`, and authenticated-principal rate-limit hits return `429`.
+- `GET /v1/stream?id=<uuid>` upgrades to WebSocket and streams the caller's job status until it is `completed` or `failed`; unknown or other-principal jobs return `404` before the upgrade, and authenticated-principal rate-limit hits return `429`.
 - `GET /metrics` returns Prometheus text-format request, execution outcome, timeout, and duration counters.
 
 Every response includes an `x-request-id` UUID for correlation. Requests larger than 16 MiB are rejected before JSON parsing. A global governor rate limit allows 10 requests per second with a burst of 20. When authentication is enabled, every non-exempt request is also subject to an in-memory token bucket keyed by the validated JWT `sub` or the shared static API key: `CORTEXENV_PER_KEY_REQUESTS_PER_SECOND` defaults to `5`, and `CORTEXENV_PER_KEY_REQUEST_BURST` defaults to `10` (each accepts `1`–`10000`). Per-principal rate-limit responses include `Retry-After`. The per-principal bucket map is capped at 10,000 identities; request-triggered cleanup reclaims identities idle for 10 minutes, and unknown identities are temporarily rejected when the cap is full. These limits are process-local and reset on restart, so they are not durable or distributed quotas.
 
-Execution is bounded globally by `CORTEXENV_MAX_CONCURRENT_EXECUTIONS` (default `4`, accepted range `1`–`1024`) and, when authentication is enabled, per authenticated principal by `CORTEXENV_MAX_EXECUTIONS_PER_KEY` (default `2`, accepted range `1`–`1024`). Exceeding the per-principal execution quota returns `429 Too Many Requests`; exhausting total server capacity returns `503 Service Unavailable`. Reusing an ID already in the async result store returns `409 Conflict` rather than overwriting the existing job.
+Execution is bounded globally by `CORTEXENV_MAX_CONCURRENT_EXECUTIONS` (default `4`, accepted range `1`–`1024`) and, when authentication is enabled, per authenticated principal by `CORTEXENV_MAX_EXECUTIONS_PER_KEY` (default `2`, accepted range `1`–`1024`). Exceeding the per-principal execution quota returns `429 Too Many Requests`; exhausting total server capacity returns `503 Service Unavailable`. Reusing your own ID already in the async result store returns `409 Conflict` rather than overwriting the existing job; another principal's ID remains hidden with `404`.
 
 Execution responses return actionable request-validation messages and sanitized runtime/server errors. Detailed runtime failures are recorded in server logs with the execution ID; host paths and internal engine diagnostics are not returned to clients.
 
@@ -167,7 +194,7 @@ CORTEXENV_API_KEY=change-me cargo run -p sandbox-api --bin cortexenv-server
 curl -H 'Authorization: Bearer change-me' http://127.0.0.1:8080/v1/executions/<execution-id>
 ```
 
-Per-key concurrent execution quotas and request rate limits are enforced in-process, with idle request-rate buckets reclaimed automatically. Durable usage accounting and broader tenant isolation remain future hardening work.
+Async jobs are associated with the authenticated principal that submitted them. JWT subjects can only retrieve or stream their own jobs; the shared static API key is one shared principal. Requests for another principal's job return `404` to avoid revealing whether the job exists. This ownership check and the concurrent execution/request-rate quotas are process-local and in-memory; they reset on restart and are not distributed or durable. Durable usage accounting and broader tenant isolation remain future hardening work.
 
 The `/metrics` endpoint is intentionally public for container and Prometheus scrapers, even when `CORTEXENV_API_KEY` is configured. It exports `cortexenv_api_requests_total`, execution outcome counters, and duration sum/count values. Keep the metrics port private or put it behind an authenticated reverse proxy when exposing the service outside a trusted network.
 

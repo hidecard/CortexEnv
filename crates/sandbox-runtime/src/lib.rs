@@ -20,7 +20,6 @@ mod python;
 /// Runtime dispatcher.
 pub struct Runtime {
     engine: SandboxEngine,
-    wasm: Engine,
 }
 impl Default for Runtime {
     fn default() -> Self {
@@ -30,14 +29,13 @@ impl Default for Runtime {
 impl Runtime {
     /// Create a runtime with a conservative Wasmtime engine.
     pub fn new() -> Result<Self, SandboxError> {
-        let mut config = wasmtime::Config::new();
-        config.epoch_interruption(true);
-        Engine::new(&config)
-            .map(|wasm| Self {
-                engine: SandboxEngine::new(),
-                wasm,
-            })
-            .map_err(|e| SandboxError::Runtime(e.to_string()))
+        // Validate Wasmtime configuration at service startup. Each execution
+        // receives a distinct Engine so one job's timeout tick cannot interrupt
+        // unrelated jobs sharing a global epoch counter.
+        create_wasm_engine()?;
+        Ok(Self {
+            engine: SandboxEngine::new(),
+        })
     }
     /// Execute a request. WASM `code` is a hex-encoded module; JavaScript and Python `code` is source text.
     pub async fn execute(
@@ -60,15 +58,24 @@ impl Runtime {
         let started = Instant::now();
         let timed_out = Arc::new(AtomicBool::new(false));
         let timer_timed_out = Arc::clone(&timed_out);
-        let timer_engine = self.wasm.clone();
-        let timeout = request.limits.timeout();
+        let worker_engine = create_wasm_engine()?;
+        let timer_engine = worker_engine.clone();
+        let timeout = request.limits.timeout().saturating_sub(started.elapsed());
+        if timeout.is_zero() {
+            return Ok(self.engine.timeout_result(&request, started));
+        }
         let timer = tokio::spawn(async move {
             sleep(timeout).await;
             timer_timed_out.store(true, Ordering::Release);
-            timer_engine.increment_epoch();
+            // Module validation/compilation can outlast short request timeouts.
+            // Keep advancing this execution's private engine epoch until the
+            // worker is joined, so its store cannot miss the one deadline tick.
+            loop {
+                timer_engine.increment_epoch();
+                sleep(std::time::Duration::from_millis(10)).await;
+            }
         });
 
-        let worker_engine = self.wasm.clone();
         let worker_request = request.clone();
         let result =
             tokio::task::spawn_blocking(move || execute_wasm_sync(&worker_engine, &worker_request))
@@ -81,6 +88,12 @@ impl Runtime {
         }
         result
     }
+}
+
+fn create_wasm_engine() -> Result<Engine, SandboxError> {
+    let mut config = wasmtime::Config::new();
+    config.epoch_interruption(true);
+    Engine::new(&config).map_err(|error| SandboxError::Runtime(error.to_string()))
 }
 
 fn execute_wasm_sync(

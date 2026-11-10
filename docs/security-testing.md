@@ -19,7 +19,7 @@ cargo fmt --all -- --check
 cargo test --workspace
 ```
 
-The current tests cover request validation, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key/JWT protection, request IDs, async duplicate IDs, bounded global and per-principal execution admission/history/rate limiting, sanitized runtime errors, WASM timeout interruption, JavaScript console capture/error/deadline behavior, and Python stdout/stderr/exit status/deadline/output caps plus unsupported network-policy rejection. The Python deadline kills only the direct interpreter child; it does not kill descendants or enforce host network, filesystem, memory, or process limits.
+The current tests cover request validation, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key/JWT protection, request IDs, async duplicate IDs, principal-scoped async job ownership, bounded global and per-principal execution admission/history/rate limiting, sanitized runtime errors, WASM timeout interruption, JavaScript console capture/error/deadline behavior, and Python stdout/stderr/exit status/deadline/output caps plus unsupported network-policy rejection. The Python deadline kills only the direct interpreter child; it does not kill descendants or enforce host network, filesystem, memory, or process limits.
 
 ## API negative and capacity checks
 
@@ -38,6 +38,7 @@ Use a disposable local instance and non-secret test credentials. Verify:
 - [ ] With `CORTEXENV_MAX_CONCURRENT_EXECUTIONS=1`, hold one benign execution in progress and verify another request receives `503 Service Unavailable`.
 - [ ] With authentication enabled and `CORTEXENV_MAX_EXECUTIONS_PER_KEY=1`, hold one benign execution for a principal and verify another gets `429`, while a different JWT `sub` can execute; verify the quota slot is reclaimed after completion or cancellation.
 - [ ] Reusing an async job UUID returns `409 Conflict` and does not replace the original status.
+- [ ] With two distinct JWT subjects, verify each can read/stream its own async job but receives `404` for the other subject's job; verify the shared static API key behaves as one principal.
 - [ ] With `CORTEXENV_MAX_STORED_EXECUTIONS=1`, complete multiple benign async jobs and verify the oldest completed result is evicted while a running job remains addressable.
 - [ ] When a result is evicted, both the status endpoint and WebSocket stream report it as not found; document this retention behavior for clients.
 

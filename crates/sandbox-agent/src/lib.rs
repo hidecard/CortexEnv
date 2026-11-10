@@ -7,6 +7,9 @@ use sandbox_common::{ExecutionRequest, ExecutionResult, SandboxError};
 use sandbox_runtime::Runtime;
 use std::sync::Arc;
 
+/// Language-model interfaces and OpenAI-compatible HTTP provider.
+pub mod llm;
+
 /// Provider-neutral code execution tool.
 #[async_trait]
 pub trait ExecuteCode: Send + Sync {

@@ -36,10 +36,11 @@
 - [x] Bounded concurrent execution admission with overload responses and duplicate async ID protection
 - [x] Bounded completed-job history with oldest-result eviction
 - [x] In-memory result storage (DashMap)
+- [x] Authenticated async job ownership checks for status and WebSocket routes
 
 ## Phase 4: Autonomous AI Agent & Self-Healing
 - [x] Provider-neutral `execute_code` tool trait
-- [ ] LLM client abstraction and providers
+- [x] Provider-neutral LLM client abstraction and OpenAI-compatible Chat Completions provider
 - [ ] ReAct / self-correction loop (max iterations)
 - [ ] Stateful sessions + optional persistent workspace
 - [ ] End-to-end self-healing test
@@ -59,7 +60,7 @@
 
 ## Cross-Cutting
 - [x] Observability dependency and tracing hooks from Phase 1
-- [ ] Multi-tenancy quota design
+- [x] In-process multi-tenancy boundary: principal-scoped async job access and execution/request quotas (durable/distributed accounting remains pending)
 - [ ] Rootless support
 - [x] Comprehensive error messages without leaking host information
 

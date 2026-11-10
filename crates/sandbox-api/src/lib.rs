@@ -238,9 +238,14 @@ impl PrincipalRequestRateLimiter {
 
 /// In-memory async job store that bounds retained completed results.
 pub struct ExecutionStore {
-    jobs: DashMap<Uuid, JobStatus>,
+    jobs: DashMap<Uuid, StoredJob>,
     completed_order: Mutex<VecDeque<Uuid>>,
     max_completed: usize,
+}
+
+struct StoredJob {
+    status: JobStatus,
+    owner: Option<String>,
 }
 
 impl ExecutionStore {
@@ -253,18 +258,25 @@ impl ExecutionStore {
         }
     }
 
-    fn insert_running(&self, id: Uuid) -> bool {
+    fn insert_running(&self, id: Uuid, owner: Option<String>) -> bool {
         match self.jobs.entry(id) {
             Entry::Occupied(_) => false,
             Entry::Vacant(entry) => {
-                entry.insert(JobStatus::Running);
+                entry.insert(StoredJob {
+                    status: JobStatus::Running,
+                    owner,
+                });
                 true
             }
         }
     }
 
     fn finish(&self, id: Uuid, status: JobStatus) {
-        self.jobs.insert(id, status);
+        if let Some(mut job) = self.jobs.get_mut(&id) {
+            job.status = status;
+        } else {
+            return;
+        }
         let mut completed_order = self
             .completed_order
             .lock()
@@ -274,7 +286,7 @@ impl ExecutionStore {
             if let Some(expired_id) = completed_order.pop_front() {
                 let is_completed = self.jobs.get(&expired_id).is_some_and(|entry| {
                     matches!(
-                        entry.value(),
+                        &entry.value().status,
                         JobStatus::Completed { .. } | JobStatus::Failed { .. }
                     )
                 });
@@ -287,7 +299,18 @@ impl ExecutionStore {
 
     /// Return a snapshot of a stored job status, if it has not been evicted.
     pub fn get(&self, id: &Uuid) -> Option<JobStatus> {
-        self.jobs.get(id).map(|entry| entry.value().clone())
+        self.get_for(id, None)
+    }
+
+    fn get_for(&self, id: &Uuid, owner: Option<&str>) -> Option<JobStatus> {
+        self.jobs.get(id).and_then(|entry| {
+            let job = entry.value();
+            if owner.is_some_and(|owner| job.owner.as_deref() != Some(owner)) {
+                None
+            } else {
+                Some(job.status.clone())
+            }
+        })
     }
 }
 
@@ -542,7 +565,7 @@ async fn authenticate(
                         .as_ref()
                         .and_then(|secret| jwt_subject(token, secret))
                 })
-                .map(PrincipalId)
+                .map(|subject| PrincipalId(format!("jwt:{subject}")))
         }
     };
 
@@ -647,8 +670,13 @@ async fn execute_async(
     let principal_permit = acquire_principal_execution_slot(&state, principal.as_ref())?;
     let permit = acquire_execution_slot(&state)?;
     let id = request.id;
-    if !state.executions.insert_running(id) {
-        return Err((StatusCode::CONFLICT, "execution ID already exists".into()));
+    let owner = principal.as_ref().map(|principal| principal.0.clone());
+    if !state.executions.insert_running(id, owner.clone()) {
+        return if state.executions.get_for(&id, owner.as_deref()).is_some() {
+            Err((StatusCode::CONFLICT, "execution ID already exists".into()))
+        } else {
+            Err((StatusCode::NOT_FOUND, "execution not found".into()))
+        };
     }
     state.metrics.record_started();
     let runtime = state.runtime.clone();
@@ -733,10 +761,14 @@ fn acquire_principal_execution_slot(
 async fn get_execution(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    Extension(principal): Extension<Option<PrincipalId>>,
 ) -> Result<Json<JobStatus>, StatusCode> {
     state
         .executions
-        .get(&id)
+        .get_for(
+            &id,
+            principal.as_ref().map(|principal| principal.0.as_str()),
+        )
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
 }
@@ -750,13 +782,22 @@ async fn stream(
     ws: WebSocketUpgrade,
     Query(query): Query<StreamQuery>,
     State(state): State<AppState>,
+    Extension(principal): Extension<Option<PrincipalId>>,
 ) -> impl axum::response::IntoResponse {
-    ws.on_upgrade(move |socket| stream_execution(socket, state, query.id))
+    let owner = principal.map(|principal| principal.0);
+    if state
+        .executions
+        .get_for(&query.id, owner.as_deref())
+        .is_none()
+    {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    ws.on_upgrade(move |socket| stream_execution(socket, state, query.id, owner))
 }
 
-async fn stream_execution(mut socket: WebSocket, state: AppState, id: Uuid) {
+async fn stream_execution(mut socket: WebSocket, state: AppState, id: Uuid, owner: Option<String>) {
     loop {
-        let Some(status) = state.executions.get(&id) else {
+        let Some(status) = state.executions.get_for(&id, owner.as_deref()) else {
             let _ = socket
                 .send(Message::Text(
                     r#"{"status":"not_found"}"#.to_string().into(),
@@ -922,11 +963,11 @@ mod tests {
     fn execution_store_evicts_oldest_completed_and_keeps_running_jobs() {
         let store = ExecutionStore::new(2);
         let active_id = Uuid::new_v4();
-        assert!(store.insert_running(active_id));
+        assert!(store.insert_running(active_id, None));
 
         let completed_ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
         for id in completed_ids {
-            assert!(store.insert_running(id));
+            assert!(store.insert_running(id, None));
             store.finish(
                 id,
                 JobStatus::Failed {
@@ -939,7 +980,21 @@ mod tests {
         assert!(store.get(&completed_ids[0]).is_none());
         assert!(store.get(&completed_ids[1]).is_some());
         assert!(store.get(&completed_ids[2]).is_some());
-        assert!(!store.insert_running(completed_ids[2]));
+        assert!(!store.insert_running(completed_ids[2], None));
+    }
+
+    #[test]
+    fn execution_store_hides_jobs_from_other_owners() {
+        let store = ExecutionStore::new(2);
+        let id = Uuid::new_v4();
+        assert!(store.insert_running(id, Some("alice".into())));
+
+        assert!(matches!(
+            store.get_for(&id, Some("alice")),
+            Some(JobStatus::Running)
+        ));
+        assert!(store.get_for(&id, Some("bob")).is_none());
+        assert!(matches!(store.get(&id), Some(JobStatus::Running)));
     }
 
     #[tokio::test]
