@@ -10,7 +10,7 @@
 - [x] `sandbox-runtime`: WASM module loading and `_start` invocation with Wasmtime
 - [x] `sandbox-runtime`: enforce WASM wall-clock timeout with Wasmtime epoch interruption
 - [x] `sandbox-runtime`: JavaScript support (`deno_core` adapter)
-- [x] `sandbox-runtime`: Python support (child process; OS isolation remains pending)
+- [x] `sandbox-runtime`: Python child process with Linux `waitid(WNOWAIT)` process-group cleanup on timeout/exit (full OS isolation remains pending)
 - [x] `sandbox-cli`: execute a hex-encoded WASM module and print JSON result
 - [x] Basic unit tests for core types and resource limits
 

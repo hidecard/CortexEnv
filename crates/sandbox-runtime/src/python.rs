@@ -1,18 +1,26 @@
 //! Python child-process adapter.
 //!
-//! This adapter is a process runner, not a security boundary. It does **not**
-//! enforce OS-level memory, process-count, network, or filesystem isolation,
-//! and it does not kill child-process descendants. In particular, accepting
-//! [`NetworkPolicy::Deny`] does not mean that network access is actually
-//! blocked by the current host. Do not use this adapter as protection against
-//! hostile code.
+//! This adapter is a process runner, not a security boundary. On Linux targets
+//! with `waitid(WNOWAIT)` support it kills members of the child's process group
+//! when execution ends or times out, but cannot contain descendants that
+//! deliberately escape that group. Other targets only terminate the direct
+//! child. It does **not** enforce OS-level memory, process-count, network, or
+//! filesystem isolation. In particular, accepting [`NetworkPolicy::Deny`]
+//! does not mean network access is blocked by the host. Do not use this adapter
+//! as protection against hostile code.
 
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+use nix::{
+    errno::Errno,
+    sys::signal::{killpg, Signal},
+    unistd::Pid,
+};
 use sandbox_common::{ExecutionRequest, ExecutionResult, NetworkPolicy, SandboxError};
 use sandbox_core::ExecutionWorkspace;
 use std::{
     ffi::OsString,
     io,
-    process::Stdio,
+    process::{ExitStatus, Stdio},
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -21,12 +29,14 @@ use tokio::{
     process::Command,
 };
 
-/// Run Python source in a fresh working directory using a direct child process.
+/// Run Python source in a fresh working directory using a supervised child process.
 ///
 /// The interpreter receives source on stdin and starts in isolated mode. Only
 /// a minimal environment is provided to the child; secrets from the parent
-/// environment are not inherited. The process is killed if this future is
-/// dropped, but descendants are outside that guarantee.
+/// environment are not inherited. On supported Linux targets the interpreter
+/// receives its own process group; remaining group members are killed on
+/// timeout and after the interpreter exits. Escaped descendants and targets
+/// without Linux `waitid(WNOWAIT)` support are not contained.
 pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResult, SandboxError> {
     match &request.network {
         NetworkPolicy::Deny => {}
@@ -48,10 +58,11 @@ pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResul
     let code = request.code.clone();
     let interpreter = python_executable();
     let workspace_path = workspace.root().to_path_buf();
-
     let execution =
         async move {
             let mut command = Command::new(interpreter);
+            #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+            command.process_group(0);
             command
                 .args(["-I", "-S", "-"])
                 .current_dir(workspace_path)
@@ -65,6 +76,7 @@ pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResul
             let mut child = command.spawn().map_err(|error| {
                 SandboxError::Runtime(format!("could not start Python: {error}"))
             })?;
+            let mut process_group = ProcessGroupGuard::new(child.id())?;
 
             let stdin = child.stdin.take().ok_or_else(|| {
                 SandboxError::Runtime("Python child stdin was not available".into())
@@ -83,7 +95,7 @@ pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResul
             };
             let drain_stdout = drain_stream(stdout, stdout_for_run, output_limit);
             let drain_stderr = drain_stream(stderr, stderr_for_run, output_limit);
-            let wait_child = child.wait();
+            let wait_child = wait_child_supervised(&mut child, &mut process_group);
 
             let (write_result, stdout_result, stderr_result, status_result) =
                 tokio::join!(write_source, drain_stdout, drain_stderr, wait_child);
@@ -104,11 +116,11 @@ pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResul
             Ok::<_, SandboxError>(status.code())
         };
 
-    let (exit_code, timed_out) =
-        match tokio::time::timeout(request.limits.timeout(), execution).await {
-            Ok(result) => (result?, false),
-            Err(_) => (None, true),
-        };
+    let execution_result = tokio::time::timeout(request.limits.timeout(), execution).await;
+    let (exit_code, timed_out) = match execution_result {
+        Ok(result) => (result?, false),
+        Err(_) => (None, true),
+    };
 
     Ok(ExecutionResult {
         id: request.id,
@@ -136,6 +148,94 @@ fn python_executable() -> OsString {
     {
         OsString::from("python3")
     }
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+struct ProcessGroupGuard {
+    pgid: Pid,
+    armed: bool,
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+impl ProcessGroupGuard {
+    fn new(pid: Option<u32>) -> Result<Self, SandboxError> {
+        let pid = pid.ok_or(SandboxError::Isolation)?;
+        let pid = i32::try_from(pid).map_err(|_| SandboxError::Isolation)?;
+        Ok(Self {
+            pgid: Pid::from_raw(pid),
+            armed: true,
+        })
+    }
+
+    fn terminate(&mut self) -> Result<(), SandboxError> {
+        loop {
+            match killpg(self.pgid, Signal::SIGKILL) {
+                Ok(()) | Err(Errno::ESRCH) => {
+                    self.armed = false;
+                    return Ok(());
+                }
+                Err(Errno::EINTR) => continue,
+                Err(_) => return Err(SandboxError::Isolation),
+            }
+        }
+    }
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.terminate();
+        }
+    }
+}
+
+#[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
+struct ProcessGroupGuard;
+
+#[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
+impl ProcessGroupGuard {
+    fn new(_pid: Option<u32>) -> Result<Self, SandboxError> {
+        Ok(Self)
+    }
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+async fn wait_child_supervised(
+    child: &mut tokio::process::Child,
+    process_group: &mut ProcessGroupGuard,
+) -> io::Result<ExitStatus> {
+    let pid = child
+        .id()
+        .ok_or_else(|| io::Error::other("Python child PID is unavailable"))?;
+    let pid = i32::try_from(pid).map_err(io::Error::other)?;
+    loop {
+        match nix::sys::wait::waitid(
+            nix::sys::wait::Id::Pid(Pid::from_raw(pid)),
+            nix::sys::wait::WaitPidFlag::WEXITED
+                | nix::sys::wait::WaitPidFlag::WNOWAIT
+                | nix::sys::wait::WaitPidFlag::WNOHANG,
+        ) {
+            Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            Ok(_) => break,
+            Err(Errno::EINTR) => continue,
+            Err(_) => return Err(io::Error::other("could not observe Python child exit")),
+        }
+    }
+    process_group
+        .terminate()
+        .map_err(|_| io::Error::other("could not terminate Python process group"))?;
+    child.wait().await
+}
+
+#[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
+async fn wait_child_supervised(
+    child: &mut tokio::process::Child,
+    _process_group: &mut ProcessGroupGuard,
+) -> io::Result<ExitStatus> {
+    child.wait().await
 }
 
 async fn drain_stream<R>(
@@ -219,6 +319,77 @@ mod tests {
         let result = execute(&request).await.unwrap();
         assert!(result.timed_out);
         assert!(result.duration_ms < 5_000);
+    }
+
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    #[tokio::test]
+    async fn kills_descendant_in_child_process_group_on_timeout() {
+        let marker = std::env::temp_dir().join(format!(
+            "cortexenv-descendant-{}.marker",
+            uuid::Uuid::new_v4()
+        ));
+        let executable = python_executable();
+        let python_path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|directory| directory.join(&executable))
+            .find(|candidate| candidate.is_file())
+            .expect("Python interpreter is available on PATH");
+        let python_literal = serde_json::to_string(python_path.to_str().unwrap()).unwrap();
+        let marker_literal = serde_json::to_string(marker.to_str().unwrap()).unwrap();
+        let descendant_code = format!(
+            "import time,pathlib; time.sleep(1); pathlib.Path({marker_literal}).write_text('survived')"
+        );
+        let descendant_argument = serde_json::to_string(&descendant_code).unwrap();
+        let source = format!(
+            "import subprocess,time; subprocess.Popen([{python_literal}, '-I', '-S', '-c', {descendant_argument}]); print('spawned', flush=True); time.sleep(30)"
+        );
+        let mut request = request(&source);
+        request.limits.timeout_ms = 500;
+
+        let result = execute(&request).await.unwrap();
+        assert!(result.timed_out, "child result: {result:?}");
+        assert!(result.stdout.contains("spawned"), "{result:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(1_300)).await;
+        let descendant_survived = marker.exists();
+        let _ = std::fs::remove_file(&marker);
+        assert!(
+            !descendant_survived,
+            "a child in the supervised process group outlived its parent"
+        );
+    }
+
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    #[tokio::test]
+    async fn kills_background_descendant_after_python_leader_exits() {
+        let marker = std::env::temp_dir().join(format!(
+            "cortexenv-background-descendant-{}.marker",
+            uuid::Uuid::new_v4()
+        ));
+        let executable = python_executable();
+        let python_path = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|directory| directory.join(&executable))
+            .find(|candidate| candidate.is_file())
+            .expect("Python interpreter is available on PATH");
+        let python_literal = serde_json::to_string(python_path.to_str().unwrap()).unwrap();
+        let marker_literal = serde_json::to_string(marker.to_str().unwrap()).unwrap();
+        let descendant_code = format!(
+            "import time,pathlib; time.sleep(1); pathlib.Path({marker_literal}).write_text('survived')"
+        );
+        let descendant_argument = serde_json::to_string(&descendant_code).unwrap();
+        let source = format!(
+            "import subprocess; subprocess.Popen([{python_literal}, '-I', '-S', '-c', {descendant_argument}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); print('spawned', flush=True)"
+        );
+
+        let result = execute(&request(&source)).await.unwrap();
+        assert_eq!(result.exit_code, Some(0), "{result:?}");
+        assert!(!result.timed_out);
+        assert!(result.stdout.contains("spawned"), "{result:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(1_300)).await;
+        let descendant_survived = marker.exists();
+        let _ = std::fs::remove_file(&marker);
+        assert!(
+            !descendant_survived,
+            "background child survived after its process-group leader exited"
+        );
     }
 
     #[tokio::test]

@@ -19,6 +19,9 @@ bytes = "1"
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 
+[target.'cfg(all(target_os = "linux", not(target_env = "uclibc")))'.dependencies]
+nix = { version = "0.29", features = ["process", "signal"] }
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 uuid = { workspace = true }

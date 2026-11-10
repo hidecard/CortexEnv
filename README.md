@@ -2,11 +2,13 @@
 
 **CortexEnv** is a Rust workspace for building an observable execution environment for AI-generated and user-submitted code. Requests are validated first, resource policies are explicit, and language runtimes are exposed through focused adapters. Operating-system isolation is still under development; do not use the current runtimes as a hostile-code security boundary.
 
-> **Current status:** WASM, JavaScript, and Python execution adapters are available, along with shared request/result types, bounded API admission and job history, request IDs, API-key/JWT authentication, in-memory per-principal request/concurrency quotas, principal-scoped async job results, a provider-neutral chat-model interface with an OpenAI-compatible client, a bounded ReAct code-execution loop, and the CLI smoke test. JavaScript runs in `deno_core`; Python requires an installed interpreter and runs as a child process. Durable usage accounting, stateful agent sessions, end-to-end self-healing coverage, and OpenTelemetry export remain pending. Linux namespaces, seccomp, capability dropping, filesystem/network isolation, and process-tree supervision are not enforced; the adapters must not be treated as secure isolation from hostile code.
+> **Current status:** WASM, JavaScript, and Python execution adapters are available, along with shared request/result types, bounded API admission and job history, request IDs, API-key/JWT authentication, in-memory per-principal request/concurrency quotas, principal-scoped async job results, a provider-neutral chat-model interface with an OpenAI-compatible client, a bounded ReAct code-execution loop, and the CLI smoke test. JavaScript runs in `deno_core`; Python requires an installed interpreter and runs as a child process with best-effort process-group cleanup on Linux targets that support `waitid(WNOWAIT)`. Durable usage accounting, stateful agent sessions, end-to-end self-healing coverage, and OpenTelemetry export remain pending. Linux namespaces, seccomp, capability dropping, filesystem/network isolation, and containment of descendants that escape the process group are not enforced; the adapters must not be treated as secure isolation from hostile code.
 
 **Recent security progress:** authenticated async jobs are owned by their submitting principal. Status polling, WebSocket streaming, and cross-principal ID collisions do not disclose another principal's job; the static API key intentionally represents one shared principal. These ownership and quota records are in memory only and are lost on restart.
 
 **Recent runtime progress:** WASM deadlines now use a per-execution Wasmtime engine and repeated epoch ticks, preventing a deadline tick during module compilation from leaving an infinite guest loop running and preventing one execution's timeout from interrupting another.
+
+**Recent process supervision progress:** On Linux targets with `waitid(WNOWAIT)` support, Python runs in its own process group; timeout and leader exit trigger cleanup of remaining members before the leader is reaped. Descendants that escape the group and OS resource/network isolation remain unsupported.
 
 **Next roadmap priorities:** build a fail-closed child supervisor before claiming hostile-code isolation; then add durable/distributed quota accounting, OpenTelemetry export, stateful agent sessions, and end-to-end self-healing coverage. A warm worker pool also remains on the TODO roadmap.
 
@@ -50,7 +52,7 @@ flowchart LR
 | --- | --- |
 | `sandbox-common` | Shared request/result/configuration types, errors, language and network policy enums, and bounded resource validation. |
 | `sandbox-core` | Execution validation, tracing hook, fail-closed isolation plan, and per-execution temporary workspaces with traversal-safe path resolution. |
-| `sandbox-runtime` | Runtime dispatch for Wasmtime, `deno_core` JavaScript, and child-process Python execution. |
+| `sandbox-runtime` | Runtime dispatch for Wasmtime, `deno_core` JavaScript, and Python child execution with Linux process-group cleanup where `waitid(WNOWAIT)` is supported. |
 | `sandbox-api` | Axum router and server with `GET /health`, synchronous `POST /v1/execute`, asynchronous `POST /v1/execute/async`, and `GET /v1/executions/:id`. |
 | `sandbox-agent` | Provider-neutral `ExecuteCode` and `ChatModel` traits, an OpenAI-compatible chat-completions client, and a bounded ReAct execution loop. |
 | `sandbox-cli` | Local command-line runner, distributed as the `cortexenv` executable. |
