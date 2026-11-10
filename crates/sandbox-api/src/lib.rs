@@ -366,9 +366,15 @@ pub enum JobStatus {
     /// Execution is queued or running.
     Running,
     /// Execution completed.
-    Completed { result: ExecutionResult },
+    Completed {
+        /// Structured execution result.
+        result: ExecutionResult,
+    },
     /// Execution failed validation or at runtime.
-    Failed { error: String },
+    Failed {
+        /// Sanitized failure message.
+        error: String,
+    },
 }
 /// Build the API router.
 pub fn router(runtime: Arc<Runtime>) -> Router {

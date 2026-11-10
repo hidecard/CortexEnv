@@ -42,15 +42,15 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo test --workspace
 
-      # Linux-only isolation dependencies are target-gated. Windows builds the
-      # portable CLI executable and tests the shared contract crate.
+      # Linux-only isolation dependencies are target-gated. Windows now builds
+      # the portable CLI executable and validates the complete workspace.
       - name: Build cortexenv.exe on Windows
         if: runner.os == 'Windows'
         run: cargo build -p sandbox-cli --bin cortexenv --release
 
       - name: Test portable crates on Windows
         if: runner.os == 'Windows'
-        run: cargo test -p CortexEnv -p sandbox-common
+        run: cargo test --workspace
 
       - name: Upload Windows executable
         if: runner.os == 'Windows'

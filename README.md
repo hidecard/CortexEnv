@@ -251,14 +251,14 @@ curl -sS http://127.0.0.1:8080/v1/execute \
 
 Every push to `main` and every pull request targeting `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on both Ubuntu and Windows.
 
-The Ubuntu job runs the complete workspace test because the sandbox isolation roadmap targets Linux namespaces, cgroups, seccomp, and capability controls. The Windows job checks formatting, builds the portable `cortexenv.exe` release executable, tests the portable `CortexEnv` and `sandbox-common` crates, and uploads the executable as a workflow artifact. This split is intentional: the current isolation dependency set targets Linux, while the CLI and shared contract crate are cross-platform.
+Both Ubuntu and Windows jobs run the complete workspace test. Linux-only isolation dependencies are target-gated, so Windows validates the full cross-platform build as well as the release `cortexenv.exe` executable. The Windows job also uploads that executable as a workflow artifact; OS-level isolation remains a Linux-only hardening path.
 
 To run the same checks locally on Windows PowerShell after installing Rust stable and Visual Studio C++ Build Tools:
 
 ```powershell
 cargo fmt --all -- --check
 cargo build -p sandbox-cli --bin cortexenv --release
-cargo test -p CortexEnv -p sandbox-common
+cargo test --workspace
 ```
 
 ## Distributable binaries

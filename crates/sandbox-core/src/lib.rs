@@ -103,9 +103,13 @@ impl ExecutionWorkspace {
 /// Explicit plan passed to a platform-specific supervisor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IsolationPlan {
+    /// Memory ceiling in bytes for the future supervisor.
     pub memory_bytes: u64,
+    /// Maximum process/thread count for the future supervisor.
     pub process_count: u32,
+    /// Maximum open file descriptors for the future supervisor.
     pub file_descriptors: u64,
+    /// Whether network access is enabled; currently always false.
     pub network_enabled: bool,
 }
 /// Emit a structured record when an execution starts.
