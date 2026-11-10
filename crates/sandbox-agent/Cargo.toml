@@ -1,0 +1,25 @@
+[package]
+name = "sandbox-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sandbox-common = { path = "../sandbox-common" }
+sandbox-core = { path = "../sandbox-core" }
+sandbox-runtime = { path = "../sandbox-runtime" }
+sandbox-api = { path = "../sandbox-api" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+reqwest = { version = "0.12", features = ["json"] }
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dashmap = "5"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+mockall = "0.13"

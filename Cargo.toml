@@ -1,0 +1,89 @@
+[workspace]
+members = [
+    "crates/sandbox-common",
+    "crates/sandbox-core",
+    "crates/sandbox-runtime",
+    "crates/sandbox-api",
+    "crates/sandbox-agent",
+    "crates/sandbox-cli",
+]
+resolver = "2"
+
+[workspace.package]
+name = "ai-sandbox-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Sandbox Team"]
+repository = "https://github.com/example/ai-sandbox-engine"
+description = "Production-ready AI Sandbox Engine in Rust"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web framework
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "limit"] }
+hyper = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry = "0.27"
+opentelemetry-otlp = "0.27"
+metrics = "0.23"
+metrics-exporter-prometheus = "0.16"
+
+# Configuration
+figment = { version = "0.10", features = ["json", "toml"] }
+dotenvy = "0.15"
+
+# Auth
+jsonwebtoken = "9"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Rate limiting
+tower-governor = "0.4"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json"] }
+
+# Linux isolation
+nix = { version = "0.29", features = ["process", "mount", "user", "resource", "fs", "time"] }
+cgroups-rs = "0.1"
+seccompiler = "0.1"
+capctl = "0.2"
+
+# WASM
+wasmtime = "28"
+wasi-common = "24"
+
+# JS
+deno_core = "0.338"
+
+# Utilities
+bytes = "1"
+dashmap = "5"
+tracing-appender = "0.2"
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

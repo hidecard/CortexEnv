@@ -1,0 +1,32 @@
+[package]
+name = "sandbox-api"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sandbox-common = { path = "../sandbox-common" }
+sandbox-core = { path = "../sandbox-core" }
+sandbox-runtime = { path = "../sandbox-runtime" }
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "limit"] }
+hyper = "1"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+dashmap = "5"
+bytes = "1"
+reqwest = { version = "0.12", features = ["json"] }
+anyhow = "1"
+thiserror = "1"
+metrics = "0.23"
+metrics-exporter-prometheus = "0.16"
+tower-governor = "0.4"
+jsonwebtoken = "9"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
