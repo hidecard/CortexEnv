@@ -5,7 +5,7 @@
 - [x] `sandbox-common`: `ExecutionRequest`, `ExecutionResult`, `Language`, `NetworkPolicy`
 - [x] `sandbox-common`: error types, default configuration, and bounded resource validation
 - [x] `sandbox-core`: resource-limit validation and explicit fail-closed isolation plan
-- [x] `sandbox-core`: Linux cgroup v2 controller manager for memory/swap/pids limits
+- [x] `sandbox-core`: Linux cgroup v2 controller manager for CPU/memory/swap/pids limits
 - [ ] `sandbox-core`: privileged Linux namespaces/seccomp/capability enforcement in a child supervisor
 - [x] `sandbox-runtime`: WASM module loading and `_start` invocation with Wasmtime
 - [x] `sandbox-runtime`: enforce WASM wall-clock timeout with Wasmtime epoch interruption

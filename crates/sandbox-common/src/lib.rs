@@ -52,6 +52,9 @@ impl Default for NetworkPolicy {
 pub struct ResourceLimits {
     /// Wall-clock timeout in milliseconds.
     pub timeout_ms: u64,
+    /// CPU quota in milli-CPUs (1000 is one full CPU core).
+    #[serde(default = "default_cpu_quota_millis")]
+    pub cpu_quota_millis: u32,
     /// Memory ceiling in bytes.
     pub memory_bytes: u64,
     /// Process/thread ceiling.
@@ -65,6 +68,7 @@ impl Default for ResourceLimits {
     fn default() -> Self {
         Self {
             timeout_ms: 5_000,
+            cpu_quota_millis: 1_000,
             memory_bytes: 128 * 1024 * 1024,
             process_count: 32,
             file_descriptors: 64,
@@ -72,12 +76,22 @@ impl Default for ResourceLimits {
         }
     }
 }
+
+fn default_cpu_quota_millis() -> u32 {
+    1_000
+}
+
 impl ResourceLimits {
     /// Validate a limit set before execution.
     pub fn validate(&self) -> Result<(), SandboxError> {
         if self.timeout_ms == 0 || self.timeout_ms > 300_000 {
             return Err(SandboxError::InvalidRequest(
                 "timeout_ms must be between 1 and 300000".into(),
+            ));
+        }
+        if !(100..=64_000).contains(&self.cpu_quota_millis) {
+            return Err(SandboxError::InvalidRequest(
+                "cpu_quota_millis must be between 100 and 64000".into(),
             ));
         }
         if !(64 * 1024..=8 * 1024 * 1024 * 1024).contains(&self.memory_bytes) {
@@ -216,5 +230,24 @@ mod tests {
         let mut limits = ResourceLimits::default();
         limits.output_bytes = 16 * 1024 * 1024 + 1;
         assert!(limits.validate().is_err());
+    }
+
+    #[test]
+    fn deserializes_legacy_limits_with_default_cpu_quota() {
+        let limits: ResourceLimits = serde_json::from_str(
+            r#"{"timeout_ms":5000,"memory_bytes":134217728,"process_count":32,"file_descriptors":64,"output_bytes":1048576}"#,
+        )
+        .unwrap();
+        assert_eq!(limits.cpu_quota_millis, 1_000);
+        assert!(limits.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_cpu_quota_outside_supported_range() {
+        for cpu_quota_millis in [99, 64_001] {
+            let mut limits = ResourceLimits::default();
+            limits.cpu_quota_millis = cpu_quota_millis;
+            assert!(limits.validate().is_err());
+        }
     }
 }

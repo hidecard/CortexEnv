@@ -19,7 +19,7 @@ cargo fmt --all -- --check
 cargo test --workspace
 ```
 
-The current tests cover request validation, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key/JWT protection, request IDs, async duplicate IDs, principal-scoped async job ownership, bounded global and per-principal execution admission/history/rate limiting, sanitized runtime errors, WASM timeout interruption, JavaScript console capture/error/deadline behavior, and Python stdout/stderr/exit status/deadline/output caps plus unsupported network-policy rejection. On Linux targets with `waitid(WNOWAIT)` support, Python timeout/exit cleanup also kills descendants remaining in its process group; this does not contain descendants that escape that group or enforce host network, filesystem, memory, or process limits.
+The current tests cover request validation, backward-compatible decoding and range checks for CPU quotas, cgroup `cpu.max` mapping, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key/JWT protection, request IDs, async duplicate IDs, principal-scoped async job ownership, bounded global and per-principal execution admission/history/rate limiting, sanitized runtime errors, WASM timeout interruption, JavaScript console capture/error/deadline behavior, and Python stdout/stderr/exit status/deadline/output caps plus unsupported network-policy rejection. On Linux targets with `waitid(WNOWAIT)` support, Python timeout/exit cleanup also kills descendants remaining in its process group; this does not contain descendants that escape that group or enforce host network, filesystem, memory, or process limits.
 
 ## API negative and capacity checks
 

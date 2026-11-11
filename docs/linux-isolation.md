@@ -10,6 +10,7 @@ On Linux, `sandbox-core::linux` provides a fail-closed cgroup v2 controller mana
 - `memory.max` is set to the requested memory ceiling.
 - `memory.swap.max` is set to `0`.
 - `pids.max` is set to the requested process ceiling.
+- `cpu.max` is set from `cpu_quota_millis` using a 100 ms period (`1000` milli-CPUs equals one CPU core).
 - `attach_pid` writes the child PID to `cgroup.procs`.
 - Missing cgroup v2 support or an unwritable controller causes `SandboxError::Isolation`; it never silently falls back to an unrestricted execution.
 - On supported Linux targets, the Python adapter uses a distinct process group and kills same-group descendants on timeout and leader exit before reaping the leader. This is best-effort process cleanup, not a containment boundary; a descendant may escape the group.
@@ -19,7 +20,7 @@ On Linux, `sandbox-core::linux` provides a fail-closed cgroup v2 controller mana
 ## Required child-supervisor sequence
 
 1. Validate the request and create a private execution workspace.
-2. Create the cgroup and write the memory, swap, and PID limits.
+2. Create the cgroup and write the CPU, memory, swap, and PID limits.
 3. Spawn the dedicated child supervisor.
 4. In the child, create user/mount/PID/network/UTS/IPC namespaces and map an unprivileged UID/GID.
 5. Mount a minimal read-only root with a writable temporary workspace.

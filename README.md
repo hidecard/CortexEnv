@@ -10,6 +10,8 @@
 
 **Recent process supervision progress:** On Linux targets with `waitid(WNOWAIT)` support, Python runs in its own process group; timeout and leader exit trigger cleanup of remaining members before the leader is reaped. Descendants that escape the group and OS resource/network isolation remain unsupported.
 
+**Recent Linux resource-control progress:** `ResourceLimits.cpu_quota_millis` now defaults to `1000` (one CPU core), accepts 100–64,000 milli-CPUs, and maps to cgroup v2 `cpu.max` with a 100 ms period. The cgroup helper fails closed if the CPU controller file cannot be written; the execution runtime is not yet wired to create/attach each job's cgroup.
+
 **Next roadmap priorities:** build a fail-closed child supervisor before claiming hostile-code isolation; then add durable/distributed quota accounting, OpenTelemetry export, stateful agent sessions, and end-to-end self-healing coverage. A warm worker pool also remains on the TODO roadmap.
 
 Repository: <https://github.com/hidecard/CortexEnv>
@@ -40,7 +42,7 @@ flowchart LR
 ### Execution flow
 
 1. A client creates an `ExecutionRequest` with a UUID, language, source/module payload, resource limits, and network policy.
-2. `sandbox-common` rejects empty or oversized code and validates timeout, memory, process, file-descriptor, and output ceilings.
+2. `sandbox-common` rejects empty or oversized code and validates timeout, CPU quota, memory, process, file-descriptor, and output ceilings.
 3. `sandbox-core` validates and records an explicit isolation plan. OS-level network and filesystem enforcement is not complete; notably, Python `network: deny` is not currently enforced by the host.
 4. `sandbox-runtime` dispatches to the selected runtime. WASM bytes are supplied as hexadecimal text; JavaScript and Python are supplied as source text.
 5. The runtime captures bounded output and returns a structured `ExecutionResult`; WASM and the language adapters enforce execution deadlines, but Python's child process is not yet constrained by OS memory, network, or process-tree isolation.
@@ -51,7 +53,7 @@ flowchart LR
 | Component | Responsibility |
 | --- | --- |
 | `sandbox-common` | Shared request/result/configuration types, errors, language and network policy enums, and bounded resource validation. |
-| `sandbox-core` | Execution validation, tracing hook, fail-closed isolation plan, and per-execution temporary workspaces with traversal-safe path resolution. |
+| `sandbox-core` | Execution validation, tracing hook, fail-closed isolation plan, cgroup v2 CPU/memory/swap/PID controls, and per-execution temporary workspaces with traversal-safe path resolution. |
 | `sandbox-runtime` | Runtime dispatch for Wasmtime, `deno_core` JavaScript, and Python child execution with Linux process-group cleanup where `waitid(WNOWAIT)` is supported. |
 | `sandbox-api` | Axum router and server with `GET /health`, synchronous `POST /v1/execute`, asynchronous `POST /v1/execute/async`, and `GET /v1/executions/:id`. |
 | `sandbox-agent` | Provider-neutral `ExecuteCode` and `ChatModel` traits, an OpenAI-compatible chat-completions client, and a bounded ReAct execution loop. |
