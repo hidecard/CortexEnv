@@ -273,3 +273,325 @@ Result + Logs + Artifacts
 ```
 
 The first recommended end-user product is a **Private AI Data Analyst** or **Private AI Coding Agent**. These products exercise the engine, agent, workspace, artifact, audit, and private-deployment capabilities without requiring CortexEnv to compete immediately as a general-purpose public cloud sandbox.
+
+
+## Phase 12: Universal Execution Contract
+
+The platform must support both single-file code and full project/workspace execution. Keep one versioned contract for local and remote execution.
+
+- [ ] Add `runtime`, `version`, `mode`, `template`, `entrypoint`, `workspace`, `network`, `resources`, `artifacts`, and `target` fields to the execution model
+- [ ] Support `target: local` and `target: remote` with identical request/result semantics
+- [ ] Support script, build, test, preview, simulation, and service execution modes
+- [ ] Add structured artifact results for files, charts, images, reports, binaries, models, and logs
+- [ ] Add build-step and run-step separation
+- [ ] Add runtime adapter registry instead of language-specific dispatch branches
+- [ ] Add runtime capability discovery and version negotiation
+- [ ] Add environment-template manifest format
+- [ ] Add template version pinning and compatibility checks
+- [ ] Add workspace file manifest, checksums, upload/download, and cleanup policy
+- [ ] Add deterministic execution metadata: runtime version, template version, policy, and resource limits
+
+## Phase 13: Language and Runtime Adapter Coverage
+
+### Portable runtimes and scripting
+
+- [ ] WASM/WASI and Rust-to-WASM execution profile
+- [ ] JavaScript execution profile
+- [ ] TypeScript transpile/run profile
+- [ ] Python execution profile
+- [ ] Shell/Bash execution profile
+- [ ] Lua execution profile
+- [ ] Ruby execution profile
+- [ ] PHP execution profile
+- [ ] R execution profile
+- [ ] Julia execution profile
+
+### Compiled languages
+
+- [ ] C build/test/run profile
+- [ ] C++ build/test/run profile
+- [ ] Rust build/test/run profile
+- [ ] Go build/test/run profile
+- [ ] Zig build/test/run profile
+- [ ] Java/Kotlin build/test/run profile
+- [ ] C#/.NET build/test/run profile
+- [ ] Swift build/test/run profile
+- [ ] Fortran build/test/run profile
+- [ ] Compiler toolchain version selection
+- [ ] Build artifact signing/checksum and restricted run policy
+- [ ] Separate build environment from production run environment
+
+### Data and query languages
+
+- [ ] SQL execution against an explicitly selected database or fixture
+- [ ] PostgreSQL/SQLite/MySQL query profiles
+- [ ] R statistics profile
+- [ ] Julia scientific-computing profile
+- [ ] Notebook execution profile
+- [ ] Query timeout, row limit, result-size limit, and read/write policy
+- [ ] Database credential isolation and secret-redaction tests
+
+### Runtime quality
+
+- [ ] Per-runtime startup command and signal policy
+- [ ] Per-runtime environment-variable policy
+- [ ] Per-runtime filesystem and network policy
+- [ ] Per-runtime resource profile
+- [ ] Per-runtime seccomp profile
+- [ ] Runtime health checks and compatibility tests
+- [ ] Runtime CVE and dependency update process
+
+## Phase 14: Web and Application Framework Templates
+
+### Frontend and web
+
+- [ ] HTML/CSS/JavaScript live-preview workspace
+- [ ] Static HTML/CSS preview server with isolated origin
+- [ ] React + Vite + TypeScript template
+- [ ] Vue + Vite template
+- [ ] Svelte template
+- [ ] Angular template
+- [ ] Next.js template
+- [ ] Nuxt template
+- [ ] Build logs, preview URL, port policy, and artifact export
+- [ ] npm/pnpm/yarn lockfile detection
+- [ ] Offline package-cache support for frontend templates
+
+### Backend frameworks
+
+- [ ] FastAPI template
+- [ ] Django template
+- [ ] Flask template
+- [ ] Spring Boot template
+- [ ] Quarkus template
+- [ ] ASP.NET template
+- [ ] Laravel template
+- [ ] Rails template
+- [ ] Phoenix template
+- [ ] Axum template
+- [ ] Actix template
+- [ ] Go Gin/Fiber template
+- [ ] Framework health check and graceful shutdown
+- [ ] Preview proxy with private-by-default ports
+
+## Phase 15: AI and Data-Science Environments
+
+- [ ] Python data-science template
+- [ ] Python machine-learning CPU template
+- [ ] Optional GPU environment with explicit scheduling and quota
+- [ ] R statistics template
+- [ ] Julia science template
+- [ ] SQL analytics template
+- [ ] NumPy, pandas, Polars, SciPy, and scikit-learn profiles
+- [ ] PyTorch, TensorFlow, JAX, and Hugging Face profiles
+- [ ] OpenCV and image-processing profile
+- [ ] GeoPandas, Rasterio, GDAL, and geospatial profile
+- [ ] Matplotlib, Plotly, and chart artifact support
+- [ ] CSV, JSON, Excel, Parquet, PDF, image, and report artifacts
+- [ ] Notebook import/export and reproducible execution metadata
+- [ ] Local LLM integration for offline agent mode
+- [ ] Remote OpenAI-compatible provider integration for online agent mode
+- [ ] Embeddings/vector-store policy for local and remote deployments
+- [ ] Model, token, execution-step, and GPU usage accounting
+
+## Phase 16: Cybersecurity and Networking Workloads
+
+### Cybersecurity profiles
+
+- [ ] Static code-analysis profile
+- [ ] Dependency and vulnerability-scanning profile
+- [ ] YARA rule testing profile
+- [ ] Sigma rule testing profile
+- [ ] Suricata-rule testing profile
+- [ ] PCAP analysis profile
+- [ ] Log-analysis profile
+- [ ] CTF and disposable-lab profile
+- [ ] Malware-analysis profile restricted to a disposable isolated lab
+- [ ] Explicit authorization and target allowlist for active testing
+- [ ] Human approval for active network operations
+- [ ] Security-tool output and evidence artifact collection
+- [ ] Cybersecurity audit trail and lab expiration policy
+
+### Networking profiles
+
+- [ ] TCP/UDP server test profile
+- [ ] HTTP/API and gRPC test profile
+- [ ] DNS simulation profile
+- [ ] MQTT and IoT-network test profile
+- [ ] Packet parser and protocol-analysis profile
+- [ ] Network-topology simulation profile
+- [ ] Private-lab network namespace/profile
+- [ ] Network policy modes: deny, loopback, private-lab, allowlist, isolated-bridge
+- [ ] Hostname/IP/CIDR/port/protocol/bytes/time allowlist controls
+- [ ] DNS, IPv4, IPv6, proxy-bypass, and egress-audit tests
+- [ ] Never expose unrestricted public network access by default
+
+## Phase 17: IoT, Robotics, Agriculture, and Finance Profiles
+
+### IoT
+
+- [ ] Device and sensor-data simulator
+- [ ] MQTT broker integration through a controlled gateway
+- [ ] CoAP profile
+- [ ] Modbus simulator/profile
+- [ ] Arduino and PlatformIO build profile
+- [ ] ESP32 and MicroPython profile
+- [ ] STM32/Zephyr/FreeRTOS build profile
+- [ ] Raspberry Pi development profile without unrestricted host access
+- [ ] Serial, BLE, GPIO, and USB access through an audited device gateway only
+- [ ] Device ID, port, command, time, and approval policy
+
+### Robotics
+
+- [ ] ROS 2 workspace template
+- [ ] ROS bag analysis and replay
+- [ ] Gazebo simulation profile
+- [ ] Webots simulation profile
+- [ ] Isaac simulation profile where supported
+- [ ] OpenCV, SLAM, and sensor-processing profiles
+- [ ] Simulation-only default mode
+- [ ] ROS topic/service permission policy
+- [ ] Staging-robot approval workflow
+- [ ] Direct motor/hardware control disabled by default
+
+### Agriculture
+
+- [ ] Soil and weather sensor analysis profile
+- [ ] Crop-disease image analysis profile
+- [ ] Irrigation recommendation workflow
+- [ ] Yield prediction workflow
+- [ ] Satellite and geospatial-data workflow
+- [ ] Greenhouse automation simulation
+- [ ] Farm dashboard and time-series artifact support
+- [ ] MQTT/device-gateway integration with approval and audit
+
+### Finance
+
+- [ ] Financial-data analysis profile
+- [ ] Portfolio simulation and backtesting profile
+- [ ] Risk-calculation profile
+- [ ] Budget/forecasting profile
+- [ ] Fraud-detection model profile
+- [ ] Invoice and financial-report workflow
+- [ ] Historical/synthetic data mode by default
+- [ ] Live account and broker credentials prohibited in ordinary sandboxes
+- [ ] Live-trading or order-placement workflow requires a separate approved service and human approval
+- [ ] Financial audit log, retention, and reproducibility metadata
+
+## Phase 18: Offline and Online Execution Modes
+
+### Shared architecture
+
+- [ ] Use one API contract for local and remote execution
+- [ ] Add `LocalExecutionClient` and `RemoteExecutionClient`
+- [ ] Add local/remote target selection in the GUI
+- [ ] Keep the same result, job, artifact, and error rendering for both modes
+- [ ] Add capability discovery so the GUI knows which templates are available locally or remotely
+- [ ] Add explicit offline/online connection status
+
+### Offline/local mode
+
+- [ ] Package or install `cortexenv-server` for local use
+- [ ] Add Tauri-managed local engine lifecycle: start, health check, stop, and restart
+- [ ] Add local filesystem/workspace policy
+- [ ] Add local runtime and environment-template bundle
+- [ ] Add offline Python package cache or local package registry
+- [ ] Add offline npm/package cache or local registry
+- [ ] Add local model server support through an OpenAI-compatible endpoint
+- [ ] Add local history, artifacts, and quota storage
+- [ ] Add offline-first error and retry behavior
+- [ ] Ensure local execution still enforces supervisor, filesystem, network, and resource isolation
+
+### Online/remote mode
+
+- [ ] Add HTTPS remote API endpoint configuration
+- [ ] Add OIDC/JWT login and organization selection
+- [ ] Add remote queue, worker scheduling, and autoscaling
+- [ ] Add PostgreSQL, Redis, and object-storage deployment profile
+- [ ] Add remote artifacts and durable execution history
+- [ ] Add team sharing, quotas, audit, and policy management
+- [ ] Add WebSocket reconnect and polling fallback
+- [ ] Add online model-provider configuration
+- [ ] Add remote execution cost and usage reporting
+
+### Synchronization and fallback
+
+- [ ] Define what data can remain local and what can sync remotely
+- [ ] Add opt-in workspace/history synchronization
+- [ ] Add conflict handling for local and remote session state
+- [ ] Add local fallback for code execution when the remote service is unavailable
+- [ ] Clearly disable or explain remote-only features while offline
+- [ ] Never upload files or source code without explicit user policy/consent
+
+## Phase 19: GUI, Desktop, and Developer Experience
+
+### Web GUI
+
+- [ ] React + TypeScript + Vite web application
+- [ ] React Router and route-level authorization
+- [ ] TanStack Query for API/server state
+- [ ] Zustand or equivalent for local UI state
+- [ ] Tailwind CSS and accessible component system
+- [ ] Monaco Editor for IDE-like workspaces or CodeMirror for lightweight runners
+- [ ] xterm.js or sanitized console renderer for live logs
+- [ ] Workspace-type selector instead of a language-only selector
+- [ ] Code Runner workspace
+- [ ] Web App workspace
+- [ ] Data Science workspace
+- [ ] AI/ML workspace
+- [ ] Cyber Lab workspace
+- [ ] Network Lab workspace
+- [ ] IoT Simulator workspace
+- [ ] Robot Simulator workspace
+- [ ] Agriculture Analysis workspace
+- [ ] Finance Research workspace
+- [ ] Custom Environment workspace
+- [ ] Preview, build, run, test, simulate, and artifact actions
+- [ ] Burmese/English localization and accessibility support
+
+### Desktop/offline GUI
+
+- [ ] Tauri 2 desktop application using the same React frontend
+- [ ] Local CortexEnv server lifecycle management
+- [ ] Local file picker and artifact export
+- [ ] Local model configuration
+- [ ] System notifications and tray behavior where useful
+- [ ] Windows, macOS, and Linux packaging
+- [ ] Tauri capability/permission audit
+- [ ] Never execute user code in the Tauri process; route it through the sandbox supervisor
+
+### Developer tools
+
+- [ ] VS Code integration
+- [ ] Jupyter integration
+- [ ] CLI workspace/template commands
+- [ ] Project import/export
+- [ ] Git repository import with explicit permissions
+- [ ] Build/test/preview logs and downloadable artifacts
+- [ ] Webhook/MCP/IDE execution integration
+
+## Phase 20: Optional Service Layer and Integration Boundaries
+
+- [ ] Keep Rust Axum as the main control-plane and execution API
+- [ ] Add FastAPI only as an optional Python data/ML/document service
+- [ ] Define one shared OpenAPI/JSON Schema contract between services
+- [ ] Add pandas/NumPy/report-generation service where the product needs it
+- [ ] Keep arbitrary code execution inside CortexEnv isolation, never inside the FastAPI service process
+- [ ] Add local LLM service integration through an OpenAI-compatible endpoint
+- [ ] Add device gateway for IoT/robot hardware instead of direct sandbox hardware access
+- [ ] Add simulation gateway for ROS/network/device simulations
+- [ ] Add service-to-service authentication, mTLS where required, and audit correlation
+
+## Final Universal Platform Readiness Gate
+
+- [ ] At least one scripting runtime, one compiled runtime, one web template, one data template, and one simulation profile pass end-to-end tests
+- [ ] Every runtime/template declares its version, resources, network policy, filesystem policy, and artifact policy
+- [ ] Local and remote execution produce compatible results and artifacts
+- [ ] Offline mode works without external network access for the documented local templates
+- [ ] Online mode supports authentication, durable jobs, quotas, artifacts, and audit logs
+- [ ] Domain profiles default to safe simulation or read-only modes
+- [ ] Hardware, live trading, active network testing, and destructive operations require explicit policy and approval
+- [ ] GUI can create a workspace, select a template, edit/upload files, build/run/simulate, view live output, and download artifacts
+- [ ] SDK, CLI, GUI, API, and runtime-template versions have a compatibility policy
+- [ ] Security, privacy, data-retention, and acceptable-use limitations are visible to end users
+- [ ] Reference products pass trusted pilots in at least one offline and one online deployment
