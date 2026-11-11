@@ -55,26 +55,26 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 ## Phase 1 — Universal Execution Contract and API Foundation
 
 ### Goal Local/remote နောက်ပိုင်း မပြောင်းလဲဘဲ သုံးနိုင်မည့် versioned execution contract တည်ဆောက်ရန်။
-- [ ] `ExecutionRequest` schema ကို version လုပ်ရန်
-- [ ] `ExecutionResult` schema ကို version လုပ်ရန်
-- [ ] `runtime`, `runtime_version`, `mode`, `entrypoint`, `workspace`, `network`, `resources`, `artifacts`, `target` fields ထည့်ရန်
-- [ ] `target: local | remote` ကို contract ထဲထည့်ပြီး implementation ကို နောက်ပိုင်းခွဲရန်
-- [ ] `mode: analyze | script | build | test` အနက် MVP အတွက် `analyze` နှင့် `script` သတ်မှတ်ရန်
-- [ ] Explicit job states သတ်မှတ်ရန်
-- [ ] queued
-- [ ] starting
-- [ ] running
-- [ ] completed
-- [ ] failed
-- [ ] timed_out
-- [ ] cancelled
-- [ ] expired
-- [ ] Stable machine-readable error codes သတ်မှတ်ရန်
-- [ ] Timeout, CPU, memory, process, disk, output-limit semantics ရေးရန်
-- [ ] Artifact manifest နှင့် checksum format သတ်မှတ်ရန်
-- [ ] OpenAPI v1 specification ရေးပြီး freeze လုပ်ရန်
-- [ ] Compatibility and deprecation policy ရေးရန်
-- [ ] API contract tests ထည့်ရန်
+- [x] `ExecutionRequest` schema ကို version လုပ်ရန်
+- [x] `ExecutionResult` schema ကို version လုပ်ရန်
+- [x] `runtime`, `runtime_version`, `mode`, `entrypoint`, `workspace`, `network`, `resources`, `artifacts`, `target` fields ထည့်ရန်
+- [x] `target: local | remote` ကို contract ထဲထည့်ပြီး implementation ကို နောက်ပိုင်းခွဲရန်
+- [x] `mode: analyze | script | build | test` အနက် MVP အတွက် `analyze` နှင့် `script` သတ်မှတ်ရန်
+- [x] Explicit job states သတ်မှတ်ရန်
+- [x] queued
+- [x] starting
+- [x] running
+- [x] completed
+- [x] failed
+- [x] timed_out
+- [x] cancelled
+- [x] expired
+- [x] Stable machine-readable error codes သတ်မှတ်ရန်
+- [x] Timeout, CPU, memory, process, disk, output-limit semantics ရေးရန်
+- [x] Artifact manifest နှင့် checksum format သတ်မှတ်ရန်
+- [x] OpenAPI v1 specification ရေးပြီး freeze လုပ်ရန်
+- [x] Compatibility and deprecation policy ရေးရန်
+- [x] API contract tests ထည့်ရန်
 
 ### Exit gate
 

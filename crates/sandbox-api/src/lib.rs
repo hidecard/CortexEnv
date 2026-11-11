@@ -14,9 +14,12 @@ use axum::{
 };
 use dashmap::{mapref::entry::Entry, DashMap};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
-use sandbox_common::{ExecutionRequest, ExecutionResult, SandboxError};
+use sandbox_common::{
+    contract::ExecutionRequestV1, ExecutionRequest, ExecutionResult, SandboxError,
+};
 use sandbox_runtime::Runtime;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
@@ -638,8 +641,9 @@ async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
 async fn execute(
     State(state): State<AppState>,
     Extension(principal): Extension<Option<PrincipalId>>,
-    Json(request): Json<ExecutionRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Json<ExecutionResult>, (StatusCode, String)> {
+    let request = parse_execution_request(payload)?;
     let _principal_permit = acquire_principal_execution_slot(&state, principal.as_ref())?;
     let _permit = acquire_execution_slot(&state)?;
     state.metrics.record_started();
@@ -668,8 +672,9 @@ async fn execute(
 async fn execute_async(
     State(state): State<AppState>,
     Extension(principal): Extension<Option<PrincipalId>>,
-    Json(request): Json<ExecutionRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<(StatusCode, Json<Uuid>), (StatusCode, String)> {
+    let request = parse_execution_request(payload)?;
     request
         .validate()
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
@@ -714,6 +719,38 @@ async fn execute_async(
         executions.finish(id, status);
     });
     Ok((StatusCode::ACCEPTED, Json(id)))
+}
+
+fn parse_execution_request(payload: Value) -> Result<ExecutionRequest, (StatusCode, String)> {
+    if payload.get("schema_version").is_some() {
+        let request: ExecutionRequestV1 = serde_json::from_value(payload).map_err(|error| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("invalid request: could not decode API v1 contract: {error}"),
+            )
+        })?;
+        request
+            .validate()
+            .map_err(|error| (StatusCode::BAD_REQUEST, format!("invalid request: {error}")))?;
+        Ok(ExecutionRequest {
+            id: request.id,
+            language: request.runtime,
+            code: request.code,
+            limits: request.resources,
+            network: request.network,
+        })
+    } else {
+        let request: ExecutionRequest = serde_json::from_value(payload).map_err(|error| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("invalid request: could not decode legacy contract: {error}"),
+            )
+        })?;
+        request
+            .validate()
+            .map_err(|error| (StatusCode::BAD_REQUEST, format!("invalid request: {error}")))?;
+        Ok(request)
+    }
 }
 
 fn client_safe_error(error: &SandboxError) -> (StatusCode, String) {
@@ -863,6 +900,62 @@ mod tests {
                     .uri("/v1/execute/async")
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"language":"wasm","code":""}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn v1_contract_request_is_accepted_by_sync_route() {
+        let app = router(Arc::new(Runtime::default()));
+        let body = serde_json::json!({
+            "schema_version": "v1",
+            "id": Uuid::new_v4(),
+            "runtime": "wasm",
+            "mode": "script",
+            "code": "0061736d01000000",
+            "resources": sandbox_common::ResourceLimits::default(),
+            "network": "deny",
+            "artifacts": [],
+            "target": "local"
+        })
+        .to_string();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/execute")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn v1_contract_rejects_remote_target_before_queueing() {
+        let app = router(Arc::new(Runtime::default()));
+        let body = serde_json::json!({
+            "schema_version": "v1",
+            "id": Uuid::new_v4(),
+            "runtime": "wasm",
+            "code": "0061736d01000000",
+            "resources": sandbox_common::ResourceLimits::default(),
+            "network": "deny",
+            "target": "remote"
+        })
+        .to_string();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/execute/async")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
                     .unwrap(),
             )
             .await

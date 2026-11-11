@@ -7,6 +7,8 @@
 
 **Product scope and security boundary:** the v0.1 Private Analyst personas, supported/unsupported workloads, top workflows, threat model, security modes, data retention policy, decision-record template, and MVP acceptance criteria are documented in [`docs/product-scope-and-threat-model.md`](docs/product-scope-and-threat-model.md). This document is the product boundary; it does not claim that incomplete isolation controls are production-ready.
 
+**API contract:** the versioned v1 request/result types live in `sandbox-common::contract`; the frozen route description is [`docs/openapi-v1.yaml`](docs/openapi-v1.yaml), and compatibility/deprecation rules are in [`docs/api-compatibility.md`](docs/api-compatibility.md). The legacy Rust request type remains an internal adapter while the HTTP migration is completed.
+
 **Recent runtime progress:** WASM deadlines now use a per-execution Wasmtime engine and repeated epoch ticks, preventing a deadline tick during module compilation from leaving an infinite guest loop running and preventing one execution's timeout from interrupting another.
 
 **Recent WASM memory hardening:** Each Wasmtime store now enforces the request's `memory_bytes` limit on linear memory, permits only one instance and one linear memory, and traps when `memory.grow` exceeds the limit. This is a guest-memory bound, not a cap on total process, compiler, or host memory.

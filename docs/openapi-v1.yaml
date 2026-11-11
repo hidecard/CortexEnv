@@ -1,0 +1,209 @@
+openapi: 3.1.0
+info:
+  title: CortexEnv Execution API
+  version: 1.0.0
+  description: >-
+    Versioned private-node execution API for CortexEnv v0.1 Private Analyst.
+    Restricted, production, and hostile-code modes remain unavailable until
+    the dedicated Linux child supervisor and security evidence are complete.
+servers:
+  - url: http://127.0.0.1:8080
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      operationId: health
+      responses:
+        '200':
+          description: Service is alive.
+          content:
+            text/plain:
+              schema: { type: string, example: ok }
+  /metrics:
+    get:
+      security: []
+      operationId: metrics
+      responses:
+        '200':
+          description: Prometheus-compatible metrics.
+          content:
+            text/plain:
+              schema: { type: string }
+  /v1/execute:
+    post:
+      operationId: execute
+      summary: Execute one validated request synchronously
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExecutionRequestV1' }
+      responses:
+        '200':
+          description: Completed execution or timeout result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExecutionResultV1' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/CapacityUnavailable' }
+  /v1/execute/async:
+    post:
+      operationId: executeAsync
+      summary: Queue one execution and return its job identifier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExecutionRequestV1' }
+      responses:
+        '202':
+          description: Job accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AsyncAccepted' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/CapacityUnavailable' }
+  /v1/executions/{id}:
+    get:
+      operationId: getExecution
+      summary: Read an owned asynchronous execution
+      parameters:
+        - $ref: '#/components/parameters/ExecutionId'
+      responses:
+        '200':
+          description: Current job state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExecutionResultV1' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /v1/stream:
+    get:
+      operationId: streamExecution
+      summary: Stream an owned execution over WebSocket
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '101': { description: Switching Protocols }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ExecutionId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    InvalidRequest:
+      description: Request validation failed.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    Unauthorized:
+      description: Authentication or ownership check failed.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    NotFound:
+      description: Job is not visible to this principal.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    Conflict:
+      description: Execution identifier is already in use.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    RateLimited:
+      description: Request or principal quota is exhausted.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    CapacityUnavailable:
+      description: No execution slot is available.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+  schemas:
+    ExecutionRequestV1:
+      type: object
+      required: [schema_version, id, runtime, code, resources, network, target]
+      properties:
+        schema_version: { type: string, const: v1 }
+        id: { type: string, format: uuid }
+        runtime: { type: string, enum: [wasm, javascript, python] }
+        runtime_version: { type: [string, 'null'] }
+        mode: { type: string, enum: [analyze, script], default: analyze }
+        entrypoint: { type: [string, 'null'] }
+        workspace: { anyOf: [{ $ref: '#/components/schemas/WorkspaceRef' }, { type: 'null' }] }
+        code: { type: string, minLength: 1, maxLength: 16777216 }
+        resources: { $ref: '#/components/schemas/ResourceLimits' }
+        network: { type: string, enum: [deny, loopback, allowlist] }
+        artifacts:
+          type: array
+          items: { $ref: '#/components/schemas/ArtifactRequest' }
+        target: { type: string, enum: [local, remote], default: local }
+    ResourceLimits:
+      type: object
+      required: [timeout_ms, cpu_quota_millis, memory_bytes, process_count, file_descriptors, output_bytes]
+      properties:
+        timeout_ms: { type: integer, minimum: 1, maximum: 300000 }
+        cpu_quota_millis: { type: integer, minimum: 100, maximum: 64000, default: 1000 }
+        memory_bytes: { type: integer, minimum: 65536, maximum: 8589934592 }
+        process_count: { type: integer, minimum: 1, maximum: 4096 }
+        file_descriptors: { type: integer, minimum: 1, maximum: 4096 }
+        output_bytes: { type: integer, minimum: 1, maximum: 16777216 }
+    WorkspaceRef:
+      type: object
+      required: [id]
+      properties: { id: { type: string, minLength: 1, maxLength: 256 } }
+    ArtifactRequest:
+      type: object
+      required: [path, media_type]
+      properties:
+        path: { type: string }
+        media_type: { type: string }
+    ArtifactManifestEntry:
+      type: object
+      required: [path, media_type, size_bytes, sha256]
+      properties:
+        path: { type: string }
+        media_type: { type: string }
+        size_bytes: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+    ExecutionResultV1:
+      type: object
+      required: [schema_version, state, artifacts]
+      properties:
+        schema_version: { type: string, const: v1 }
+        state: { type: string, enum: [queued, starting, running, completed, failed, timed_out, cancelled, expired] }
+        result: { anyOf: [{ type: object }, { type: 'null' }] }
+        error: { anyOf: [{ $ref: '#/components/schemas/ErrorEnvelope' }, { type: 'null' }] }
+        artifacts:
+          type: array
+          items: { $ref: '#/components/schemas/ArtifactManifestEntry' }
+    AsyncAccepted:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running] }
+    ErrorEnvelope:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          enum: [invalid_request, unauthorized, unsupported, resource_limit, timed_out, isolation_unavailable, runtime_failure, not_found, internal]
+        message: { type: string }
+        retryable: { type: boolean }

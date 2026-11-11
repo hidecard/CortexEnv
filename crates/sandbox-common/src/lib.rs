@@ -8,6 +8,9 @@ use std::{fmt, time::Duration};
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Versioned API request/result schemas and stable lifecycle/error contracts.
+pub mod contract;
+
 /// Supported execution languages.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -148,7 +151,7 @@ impl ExecutionRequest {
 }
 
 /// Result of one execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExecutionResult {
     /// Request identifier.
     pub id: Uuid,
@@ -190,6 +193,21 @@ pub enum SandboxError {
     #[error("internal error")]
     /// An unexpected internal failure occurred.
     Internal,
+}
+
+impl SandboxError {
+    /// Map an internal error to the stable API v1 error category.
+    pub fn code(&self) -> contract::ErrorCode {
+        match self {
+            Self::InvalidRequest(_) => contract::ErrorCode::InvalidRequest,
+            Self::UnsupportedLanguage(_) => contract::ErrorCode::Unsupported,
+            Self::ResourceLimit(_) => contract::ErrorCode::ResourceLimit,
+            Self::Timeout => contract::ErrorCode::TimedOut,
+            Self::Runtime(_) => contract::ErrorCode::RuntimeFailure,
+            Self::Isolation => contract::ErrorCode::IsolationUnavailable,
+            Self::Internal => contract::ErrorCode::Internal,
+        }
+    }
 }
 
 /// Service configuration.
