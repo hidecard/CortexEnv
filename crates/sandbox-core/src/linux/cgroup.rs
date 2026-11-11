@@ -3,6 +3,7 @@
 use sandbox_common::{ResourceLimits, SandboxError};
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
@@ -73,6 +74,11 @@ impl CgroupV2 {
         write_value(&self.path.join("cgroup.procs"), &pid.to_string())
     }
 
+    /// Kill all processes in this cgroup when the kernel exposes `cgroup.kill`.
+    pub fn kill_all(&self) -> Result<(), SandboxError> {
+        write_value(&self.path.join("cgroup.kill"), "1")
+    }
+
     /// Return the cgroup directory path.
     pub fn path(&self) -> &Path {
         &self.path
@@ -81,6 +87,16 @@ impl CgroupV2 {
 
 impl Drop for CgroupV2 {
     fn drop(&mut self) {
+        let _ = self.kill_all();
+        for _ in 0..20 {
+            let Ok(events) = fs::read_to_string(self.path.join("cgroup.events")) else {
+                break;
+            };
+            if events.lines().any(|line| line.trim() == "populated 0") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         let _ = fs::remove_dir(&self.path);
     }
 }
@@ -99,7 +115,13 @@ fn apply_limits(path: &Path, limits: &CgroupLimits) -> Result<(), SandboxError> 
 }
 
 fn write_value(path: &Path, value: &str) -> Result<(), SandboxError> {
-    fs::write(path, value).map_err(|_| SandboxError::Isolation)
+    let mut controller = fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .map_err(|_| SandboxError::Isolation)?;
+    controller
+        .write_all(value.as_bytes())
+        .map_err(|_| SandboxError::Isolation)
 }
 
 #[cfg(test)]
@@ -145,6 +167,22 @@ mod tests {
         assert_eq!(
             fs::read_to_string(root.path().join("cpu.max")).unwrap(),
             "150000 100000"
+        );
+    }
+
+    #[test]
+    fn kill_all_uses_the_cgroup_kill_controller() {
+        let root = tempdir().unwrap();
+        fs::write(root.path().join("cgroup.kill"), "").unwrap();
+        let cgroup = CgroupV2 {
+            path: root.path().to_path_buf(),
+        };
+
+        cgroup.kill_all().unwrap();
+
+        assert_eq!(
+            fs::read_to_string(root.path().join("cgroup.kill")).unwrap(),
+            "1"
         );
     }
 

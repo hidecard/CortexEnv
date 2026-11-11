@@ -1,25 +1,30 @@
 //! Python child-process adapter.
 //!
-//! This adapter is a process runner, not a security boundary. On Linux targets
-//! with `waitid(WNOWAIT)` support it kills members of the child's process group
-//! when execution ends or times out, but cannot contain descendants that
-//! deliberately escape that group. Other targets only terminate the direct
-//! child. It does **not** enforce OS-level memory, process-count, network, or
-//! filesystem isolation. In particular, accepting [`NetworkPolicy::Deny`]
-//! does not mean network access is blocked by the host. Do not use this adapter
-//! as protection against hostile code.
+//! This adapter is a process runner, not a complete security boundary. On Linux
+//! targets with `waitid(WNOWAIT)` support it kills members of the child's
+//! process group when execution ends or times out. Setting
+//! `CORTEXENV_CGROUP_ROOT` additionally opts the Python child into cgroup v2
+//! CPU, memory, swap, and process-count limits before user code starts; the
+//! cgroup's `cgroup.kill` file is used for cleanup when the kernel exposes it.
+//! Without that opt-in, descendants that escape the process group can survive.
+//! Neither mode enforces network or filesystem isolation, and accepting
+//! [`NetworkPolicy::Deny`] does not mean network access is blocked by the
+//! host. Do not use this adapter as protection against hostile code.
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 use nix::{
     errno::Errno,
-    sys::signal::{killpg, Signal},
+    sys::signal::{kill, killpg, Signal},
     unistd::Pid,
 };
 use sandbox_common::{ExecutionRequest, ExecutionResult, NetworkPolicy, SandboxError};
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+use sandbox_core::linux::CgroupV2;
 use sandbox_core::ExecutionWorkspace;
 use std::{
     ffi::OsString,
     io,
+    path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
     sync::{Arc, Mutex},
     time::Instant,
@@ -35,9 +40,19 @@ use tokio::{
 /// a minimal environment is provided to the child; secrets from the parent
 /// environment are not inherited. On supported Linux targets the interpreter
 /// receives its own process group; remaining group members are killed on
-/// timeout and after the interpreter exits. Escaped descendants and targets
-/// without Linux `waitid(WNOWAIT)` support are not contained.
+/// timeout and after the interpreter exits. If `CORTEXENV_CGROUP_ROOT` points
+/// to a writable delegated cgroup v2 subtree, the child is attached before
+/// Python source is released from a stop/exec gate. Targets without the
+/// required Linux wait/signal support do not enable cgroup execution.
 pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResult, SandboxError> {
+    let cgroup_root = std::env::var_os("CORTEXENV_CGROUP_ROOT").map(PathBuf::from);
+    execute_with_cgroup_root(request, cgroup_root.as_deref()).await
+}
+
+async fn execute_with_cgroup_root(
+    request: &ExecutionRequest,
+    cgroup_root: Option<&Path>,
+) -> Result<ExecutionResult, SandboxError> {
     match &request.network {
         NetworkPolicy::Deny => {}
         _ => {
@@ -58,9 +73,19 @@ pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResul
     let code = request.code.clone();
     let interpreter = python_executable();
     let workspace_path = workspace.root().to_path_buf();
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    let cgroup: Option<CgroupHandle> = cgroup_root
+        .map(|root| CgroupV2::create(root, request.id, &request.limits))
+        .transpose()?;
+    #[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
+    let cgroup: Option<CgroupHandle> = if cgroup_root.is_some() {
+        return Err(SandboxError::Isolation);
+    } else {
+        None
+    };
     let execution =
         async move {
-            let mut command = Command::new(interpreter);
+            let mut command = python_command(interpreter, cgroup.is_some());
             #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
             command.process_group(0);
             command
@@ -76,7 +101,17 @@ pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResul
             let mut child = command.spawn().map_err(|error| {
                 SandboxError::Runtime(format!("could not start Python: {error}"))
             })?;
-            let mut process_group = ProcessGroupGuard::new(child.id())?;
+            let mut process_group = ProcessGroupGuard::new(child.id(), cgroup)?;
+            #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+            if process_group.cgroup().is_some() {
+                wait_for_child_stop(&mut child).await?;
+                let pid = child.id().ok_or(SandboxError::Isolation)?;
+                process_group
+                    .cgroup()
+                    .ok_or(SandboxError::Isolation)?
+                    .attach_pid(pid)?;
+                resume_child(pid)?;
+            }
 
             let stdin = child.stdin.take().ok_or_else(|| {
                 SandboxError::Runtime("Python child stdin was not available".into())
@@ -151,34 +186,114 @@ fn python_executable() -> OsString {
 }
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+type CgroupHandle = CgroupV2;
+
+#[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
+type CgroupHandle = ();
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+fn python_command(interpreter: OsString, wait_for_cgroup: bool) -> Command {
+    let mut command = if wait_for_cgroup {
+        let mut shell = Command::new("/bin/sh");
+        shell.args(["-c", "kill -STOP $$; exec \"$@\"", "cortexenv-python"]);
+        shell.arg(resolve_python_for_shell(interpreter));
+        shell
+    } else {
+        Command::new(interpreter)
+    };
+    command
+}
+
+#[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
+fn python_command(interpreter: OsString, _wait_for_cgroup: bool) -> Command {
+    Command::new(interpreter)
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+fn resolve_python_for_shell(executable: OsString) -> OsString {
+    if Path::new(&executable).components().count() > 1 {
+        return executable;
+    }
+    let Some(search_path) = std::env::var_os("PATH") else {
+        return executable;
+    };
+    for directory in std::env::split_paths(&search_path) {
+        let candidate = directory.join(&executable);
+        if candidate.is_file() {
+            return candidate
+                .canonicalize()
+                .unwrap_or(candidate)
+                .into_os_string();
+        }
+    }
+    executable
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 struct ProcessGroupGuard {
     pgid: Pid,
     armed: bool,
+    cgroup: Option<CgroupV2>,
 }
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 impl ProcessGroupGuard {
-    fn new(pid: Option<u32>) -> Result<Self, SandboxError> {
+    fn new(pid: Option<u32>, cgroup: Option<CgroupV2>) -> Result<Self, SandboxError> {
         let pid = pid.ok_or(SandboxError::Isolation)?;
         let pid = i32::try_from(pid).map_err(|_| SandboxError::Isolation)?;
         Ok(Self {
             pgid: Pid::from_raw(pid),
             armed: true,
+            cgroup,
         })
     }
 
+    fn cgroup(&self) -> Option<&CgroupV2> {
+        self.cgroup.as_ref()
+    }
+
     fn terminate(&mut self) -> Result<(), SandboxError> {
-        loop {
+        let result = loop {
             match killpg(self.pgid, Signal::SIGKILL) {
-                Ok(()) | Err(Errno::ESRCH) => {
-                    self.armed = false;
-                    return Ok(());
-                }
+                Ok(()) | Err(Errno::ESRCH) => break Ok(()),
                 Err(Errno::EINTR) => continue,
-                Err(_) => return Err(SandboxError::Isolation),
+                Err(_) => break Err(SandboxError::Isolation),
             }
+        };
+        if let Some(cgroup) = &self.cgroup {
+            let _ = cgroup.kill_all();
+        }
+        if result.is_ok() {
+            self.armed = false;
+        }
+        result
+    }
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+async fn wait_for_child_stop(child: &mut tokio::process::Child) -> Result<(), SandboxError> {
+    let pid = child.id().ok_or(SandboxError::Isolation)?;
+    let pid = i32::try_from(pid).map_err(|_| SandboxError::Isolation)?;
+    loop {
+        match nix::sys::wait::waitid(
+            nix::sys::wait::Id::Pid(Pid::from_raw(pid)),
+            nix::sys::wait::WaitPidFlag::WSTOPPED | nix::sys::wait::WaitPidFlag::WNOHANG,
+        ) {
+            Ok(nix::sys::wait::WaitStatus::Stopped(_, Signal::SIGSTOP)) => return Ok(()),
+            Ok(nix::sys::wait::WaitStatus::StillAlive) => {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            Ok(_) => return Err(SandboxError::Isolation),
+            Err(Errno::EINTR) => continue,
+            Err(_) => return Err(SandboxError::Isolation),
         }
     }
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+fn resume_child(pid: u32) -> Result<(), SandboxError> {
+    let pid = i32::try_from(pid).map_err(|_| SandboxError::Isolation)?;
+    kill(Pid::from_raw(pid), Signal::SIGCONT).map_err(|_| SandboxError::Isolation)
 }
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
@@ -195,7 +310,7 @@ struct ProcessGroupGuard;
 
 #[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
 impl ProcessGroupGuard {
-    fn new(_pid: Option<u32>) -> Result<Self, SandboxError> {
+    fn new(_pid: Option<u32>, _cgroup: Option<()>) -> Result<Self, SandboxError> {
         Ok(Self)
     }
 }
@@ -288,6 +403,58 @@ mod tests {
             limits: ResourceLimits::default(),
             network: NetworkPolicy::Deny,
         }
+    }
+
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    #[tokio::test]
+    async fn cgroup_gate_waits_for_parent_continue_before_exec() {
+        let mut command = python_command(python_executable(), true);
+        command
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let mut child = command.spawn().unwrap();
+        let mut process_group = ProcessGroupGuard::new(child.id(), None).unwrap();
+        let pid = child.id().unwrap();
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            wait_for_child_stop(&mut child),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        resume_child(pid).unwrap();
+        let status = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            wait_child_supervised(&mut child, &mut process_group),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert!(status.success());
+    }
+
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    #[tokio::test]
+    async fn cgroup_setup_failure_prevents_python_from_starting() {
+        let root =
+            std::env::temp_dir().join(format!("cortexenv-cgroup-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("cgroup.controllers"), "cpu memory pids").unwrap();
+        let marker = root.join("python-ran");
+        let marker_literal = serde_json::to_string(marker.to_str().unwrap()).unwrap();
+        let request = request(&format!("open({marker_literal}, 'w').write('started')"));
+
+        let result = execute_with_cgroup_root(&request, Some(&root)).await;
+
+        assert!(matches!(result, Err(SandboxError::Isolation)));
+        assert!(!marker.exists());
+        assert!(!root.join(format!("cortexenv-{}", request.id)).exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(not(windows))]
