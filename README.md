@@ -154,6 +154,24 @@ This setup is intended for Linux, macOS Docker Desktop, and Linux containers thr
 
 Tagged releases publish `ghcr.io/hidecard/cortexenv:<tag>` and `ghcr.io/hidecard/cortexenv:latest`. The image is intended for the API server; the CLI executable remains available separately for local WASM smoke tests.
 
+### Phase 1 Linux isolation smoke tests
+
+The repository includes guarded probes for the Phase 1 namespace and seccomp prerequisites. They never submit code to the API. Run them only as an unprivileged user inside a disposable Linux VM or isolated CI runner; the namespace probe creates user, mount, PID, network, UTS, and IPC namespaces in a child process, and the seccomp probe installs strict seccomp only in its forked child:
+
+```bash
+# Safe unit checks plus kernel probes. The command returns 77 when the host
+# or container refuses an optional kernel feature, rather than treating it as
+# a successful production-isolation result.
+bash scripts/security/run-phase1-smoke.sh
+
+# Opt in to the namespace probe after reviewing the safety rules:
+CORTEXENV_RUN_ISOLATION_SMOKE=1 bash scripts/security/phase1-isolation-smoke.sh
+
+python3 scripts/security/seccomp-kernel-smoke.py
+```
+
+These scripts verify kernel primitives and the fail-closed foundation only. They do **not** prove that runtime-specific seccomp profiles, UID/GID mapping, mounts, cgroups, network policy, or the production child supervisor are active. See [`docs/security-testing.md`](docs/security-testing.md) before running them.
+
 ## CLI usage
 
 The `cortexenv` CLI takes a file containing hexadecimal WASM bytes. This minimal empty module is enough to verify loading and execution:

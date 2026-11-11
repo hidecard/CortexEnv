@@ -21,6 +21,28 @@ cargo test --workspace
 
 The current tests cover request validation, backward-compatible decoding and range checks for CPU quotas, cgroup `cpu.max` mapping, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key/JWT protection, request IDs, async duplicate IDs, principal-scoped async job ownership, bounded global and per-principal execution admission/history/rate limiting, sanitized runtime errors, WASM timeout interruption and request-bounded linear-memory growth, JavaScript console capture/error/deadline behavior, and Python stdout/stderr/exit status/deadline/output caps plus unsupported network-policy rejection. Linux tests verify the Python launcher waits for the parent to attach it before `exec`, and missing cgroup controller files fail before user source runs. On Linux targets with `waitid(WNOWAIT)` support, Python timeout/exit cleanup kills descendants in its process group; a configured cgroup additionally uses `cgroup.kill` when available. Without a configured cgroup or supported `cgroup.kill`, escaped descendants and host network/filesystem isolation are not contained.
 
+## Phase 1 smoke scripts
+
+The following scripts are safe prerequisite probes, not a production security certification:
+
+```bash
+# Unit checks for the fail-closed child-hardening and cgroup foundations.
+cargo test -p sandbox-core linux::supervisor::tests -- --nocapture
+cargo test -p sandbox-core linux::cgroup::tests -- --nocapture
+
+# Kernel seccomp primitive in a forked child. No runtime code is executed.
+python3 scripts/security/seccomp-kernel-smoke.py
+
+# Namespace visibility and unprivileged user mapping in a forked child.
+# Run only in a disposable unprivileged Linux VM/CI runner.
+CORTEXENV_RUN_ISOLATION_SMOKE=1 bash scripts/security/phase1-isolation-smoke.sh
+
+# Run all of the above through one guarded command.
+bash scripts/security/run-phase1-smoke.sh
+```
+
+Exit status `77` means a kernel feature was unavailable or refused by the container and was reported as `SKIP`; it must not be converted into a passing production-isolation result. The namespace script compares the child namespace inode identities with the host PID 1 namespaces and checks nested PID visibility. The seccomp script checks `PR_SET_NO_NEW_PRIVS` followed by `SECCOMP_MODE_STRICT` only in its child. It does not test CortexEnv's runtime-specific BPF profile because that backend remains intentionally fail-closed until a real filter implementation is added.
+
 ## API negative and capacity checks
 
 Use a disposable local instance and non-secret test credentials. Verify:
