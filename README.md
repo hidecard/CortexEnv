@@ -168,9 +168,12 @@ bash scripts/security/run-phase1-smoke.sh
 CORTEXENV_RUN_ISOLATION_SMOKE=1 bash scripts/security/phase1-isolation-smoke.sh
 
 python3 scripts/security/seccomp-kernel-smoke.py
+
+# Check the cgroup v2 controllers and delegated limit files. This is read-only.
+CORTEXENV_RUN_ISOLATION_SMOKE=1 bash scripts/security/cgroup-v2-smoke.sh
 ```
 
-These scripts verify kernel primitives and the fail-closed foundation only. They do **not** prove that runtime-specific seccomp profiles, UID/GID mapping, mounts, cgroups, network policy, or the production child supervisor are active. See [`docs/security-testing.md`](docs/security-testing.md) before running them.
+These scripts verify kernel primitives and the fail-closed foundation only. They do **not** prove that runtime-specific seccomp profiles, UID/GID mapping, mounts, cgroup attachment, network policy, or the production child supervisor are active. See [`docs/security-testing.md`](docs/security-testing.md) before running them.
 
 ## CLI usage
 

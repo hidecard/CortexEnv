@@ -8,7 +8,7 @@ The repository already contains a Rust workspace, shared execution contracts, WA
 
 The child-hardening foundation is not yet wired into a dedicated runtime supervisor. The pinned seccomp dependency is currently a placeholder, so production execution must remain fail-closed until a real runtime-specific seccomp-BPF backend, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision are implemented and tested in a disposable Linux environment.
 
-Phase 1 test scripts are available under [`scripts/security`](scripts/security/): they run safe unit checks, a forked-child kernel seccomp primitive probe, and an opt-in namespace/user-mapping probe. These scripts provide prerequisite evidence only; they do not mark the production supervisor or runtime-specific seccomp profile complete.
+Phase 1 test scripts are available under [`scripts/security`](scripts/security/): they run safe unit checks, a forked-child kernel seccomp primitive probe, an opt-in namespace/user-mapping probe, and a read-only cgroup v2 delegated-root preflight. These scripts provide prerequisite evidence only; they do not mark the production supervisor or runtime-specific seccomp profile complete.
 
 > ရည်ရွယ်ချက် — Private AI Data Analyst အတွက် လုံခြုံပြီး self-hosted execution platform MVP တစ်ခုကို အရင်ဆုံး production pilot အထိ ပြီးမြောက်စေရန်။
 > ပထမဆုံး deployment: **trusted internal / private enterprise single-node**
@@ -167,6 +167,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [ ] Dependency audit, SBOM, image scan, secret scan ထည့်ရန်
 - [ ] Security claim → test → evidence matrix ပြုလုပ်ရန်
 - [x] Add guarded namespace and kernel-seccomp smoke scripts that never submit code to the API.
+- [x] Add a read-only cgroup v2 controller/delegated-root preflight to the Phase 1 smoke runner.
 - [ ] Run the smoke scripts in the supported disposable Linux VM/CI environment and attach versioned evidence.
 - [ ] Independent security review ပြုလုပ်ရန်
 - [ ] Known limitations နှင့် disclosure policy ထုတ်ပြန်ရန်

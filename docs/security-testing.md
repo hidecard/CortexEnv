@@ -33,6 +33,9 @@ cargo test -p sandbox-core linux::cgroup::tests -- --nocapture
 # Kernel seccomp primitive in a forked child. No runtime code is executed.
 python3 scripts/security/seccomp-kernel-smoke.py
 
+# cgroup v2 controller and delegated-root preflight. Read-only.
+CORTEXENV_RUN_ISOLATION_SMOKE=1 bash scripts/security/cgroup-v2-smoke.sh
+
 # Namespace visibility and unprivileged user mapping in a forked child.
 # Run only in a disposable unprivileged Linux VM/CI runner.
 CORTEXENV_RUN_ISOLATION_SMOKE=1 bash scripts/security/phase1-isolation-smoke.sh
@@ -41,7 +44,7 @@ CORTEXENV_RUN_ISOLATION_SMOKE=1 bash scripts/security/phase1-isolation-smoke.sh
 bash scripts/security/run-phase1-smoke.sh
 ```
 
-Exit status `77` means a kernel feature was unavailable or refused by the container and was reported as `SKIP`; it must not be converted into a passing production-isolation result. The namespace script compares the child namespace inode identities with the host PID 1 namespaces and checks nested PID visibility. The seccomp script checks `PR_SET_NO_NEW_PRIVS` followed by `SECCOMP_MODE_STRICT` only in its child. It does not test CortexEnv's runtime-specific BPF profile because that backend remains intentionally fail-closed until a real filter implementation is added.
+Exit status `77` means a kernel feature was unavailable or refused by the container and was reported as `SKIP`; it must not be converted into a passing production-isolation result. The cgroup script checks that `cpu`, `memory`, and `pids` controllers plus the required limit files exist; it does not mutate the host cgroup tree. The namespace script compares the child namespace inode identities with the host PID 1 namespaces and checks nested PID visibility. The seccomp script checks `PR_SET_NO_NEW_PRIVS` followed by `SECCOMP_MODE_STRICT` only in its child. It does not test CortexEnv's runtime-specific BPF profile because that backend remains intentionally fail-closed until a real filter implementation is added.
 
 ## API negative and capacity checks
 

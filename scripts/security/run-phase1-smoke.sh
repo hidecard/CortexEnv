@@ -22,6 +22,15 @@ printf '%s\n' '== sandbox-core safety/unit checks =='
 cargo test -p sandbox-core linux::supervisor::tests -- --nocapture
 cargo test -p sandbox-core linux::cgroup::tests -- --nocapture
 
+printf '%s\n' '== cgroup v2 delegated-root preflight =='
+set +e
+bash scripts/security/cgroup-v2-smoke.sh
+cgroup_status=$?
+set -e
+if [[ "$cgroup_status" -ne 0 && "$cgroup_status" -ne 77 ]]; then
+  exit "$cgroup_status"
+fi
+
 printf '%s\n' '== seccomp kernel primitive probe =='
 set +e
 python3 scripts/security/seccomp-kernel-smoke.py
@@ -45,7 +54,7 @@ if [[ "$namespace_status" -ne 0 && "$namespace_status" -ne 77 ]]; then
   exit "$namespace_status"
 fi
 
-if [[ "$seccomp_status" -eq 77 || "$namespace_status" -eq 77 ]]; then
+if [[ "$cgroup_status" -eq 77 || "$seccomp_status" -eq 77 || "$namespace_status" -eq 77 ]]; then
   echo "PASS: safe checks passed; one or more kernel controls were unavailable and were reported as SKIP"
   exit 77
 fi
