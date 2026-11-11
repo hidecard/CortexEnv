@@ -193,7 +193,7 @@ type CgroupHandle = ();
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 fn python_command(interpreter: OsString, wait_for_cgroup: bool) -> Command {
-    let mut command = if wait_for_cgroup {
+    let command = if wait_for_cgroup {
         let mut shell = Command::new("/bin/sh");
         shell.args(["-c", "kill -STOP $$; exec \"$@\"", "cortexenv-python"]);
         shell.arg(resolve_python_for_shell(interpreter));

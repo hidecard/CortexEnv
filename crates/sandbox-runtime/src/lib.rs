@@ -12,10 +12,10 @@ use std::{
     time::Instant,
 };
 use tokio::time::sleep;
-use wasmtime::{Engine, Instance, Module, Store};
 
 mod javascript;
 mod python;
+mod wasm;
 
 /// Runtime dispatcher.
 pub struct Runtime {
@@ -32,7 +32,7 @@ impl Runtime {
         // Validate Wasmtime configuration at service startup. Each execution
         // receives a distinct Engine so one job's timeout tick cannot interrupt
         // unrelated jobs sharing a global epoch counter.
-        create_wasm_engine()?;
+        wasm::create_engine()?;
         Ok(Self {
             engine: SandboxEngine::new(),
         })
@@ -58,7 +58,7 @@ impl Runtime {
         let started = Instant::now();
         let timed_out = Arc::new(AtomicBool::new(false));
         let timer_timed_out = Arc::clone(&timed_out);
-        let worker_engine = create_wasm_engine()?;
+        let worker_engine = wasm::create_engine()?;
         let timer_engine = worker_engine.clone();
         let timeout = request.limits.timeout().saturating_sub(started.elapsed());
         if timeout.is_zero() {
@@ -77,10 +77,11 @@ impl Runtime {
         });
 
         let worker_request = request.clone();
-        let result =
-            tokio::task::spawn_blocking(move || execute_wasm_sync(&worker_engine, &worker_request))
-                .await
-                .map_err(|error| SandboxError::Runtime(error.to_string()))?;
+        let result = tokio::task::spawn_blocking(move || {
+            wasm::execute_wasm_sync(&worker_engine, &worker_request)
+        })
+        .await
+        .map_err(|error| SandboxError::Runtime(error.to_string()))?;
         timer.abort();
 
         if timed_out.load(Ordering::Acquire) {
@@ -88,40 +89,6 @@ impl Runtime {
         }
         result
     }
-}
-
-fn create_wasm_engine() -> Result<Engine, SandboxError> {
-    let mut config = wasmtime::Config::new();
-    config.epoch_interruption(true);
-    Engine::new(&config).map_err(|error| SandboxError::Runtime(error.to_string()))
-}
-
-fn execute_wasm_sync(
-    engine: &Engine,
-    request: &ExecutionRequest,
-) -> Result<ExecutionResult, SandboxError> {
-    let started = Instant::now();
-    let bytes = hex::decode(&request.code)
-        .map_err(|_| SandboxError::InvalidRequest("WASM code must be hex-encoded bytes".into()))?;
-    let module = Module::new(engine, bytes).map_err(|e| SandboxError::Runtime(e.to_string()))?;
-    let mut store = Store::new(engine, ());
-    store.set_epoch_deadline(1);
-    let instance = Instance::new(&mut store, &module, &[])
-        .map_err(|e| SandboxError::Runtime(e.to_string()))?;
-    if let Ok(start) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
-        start
-            .call(&mut store, ())
-            .map_err(|e| SandboxError::Runtime(e.to_string()))?;
-    }
-    Ok(ExecutionResult {
-        id: request.id,
-        exit_code: Some(0),
-        stdout: String::new(),
-        stderr: String::new(),
-        timed_out: false,
-        duration_ms: started.elapsed().as_millis(),
-        completed_at: chrono::Utc::now(),
-    })
 }
 
 #[cfg(test)]
