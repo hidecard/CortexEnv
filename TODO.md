@@ -1,72 +1,412 @@
-# AI Sandbox Engine – Progress Tracker
+# CortexEnv — MVP-Focused Production TODO Roadmap
 
-## Phase 1: Core Sandbox Engine
-- [x] Workspace + all crates created
-- [x] `sandbox-common`: `ExecutionRequest`, `ExecutionResult`, `Language`, `NetworkPolicy`
-- [x] `sandbox-common`: error types, default configuration, and bounded resource validation
-- [x] `sandbox-core`: resource-limit validation and explicit fail-closed isolation plan
-- [x] `sandbox-core`: Linux cgroup v2 controller manager for CPU/memory/swap/pids limits
-- [ ] `sandbox-core`: privileged Linux namespaces/seccomp/capability enforcement in a child supervisor
-- [x] `sandbox-runtime`: WASM module loading and `_start` invocation with Wasmtime
-- [x] `sandbox-runtime`: enforce WASM wall-clock timeout with Wasmtime epoch interruption
-- [x] `sandbox-runtime`: enforce the request's WASM linear-memory limit with one instance/memory per store
-- [x] `sandbox-runtime`: JavaScript support (`deno_core` adapter)
-- [x] `sandbox-runtime`: Python child with Linux `waitid(WNOWAIT)` process-group cleanup and opt-in cgroup v2 attachment before source execution (namespace/seccomp isolation remains pending)
-- [x] `sandbox-cli`: execute a hex-encoded WASM module and print JSON result
-- [x] Basic unit tests for core types and resource limits
+This is the authoritative implementation roadmap for **CortexEnv v0.1 Private Analyst**. The MVP target is a trusted internal/private-enterprise single-node deployment with Python and WASM runtimes, default-deny networking, durable jobs/artifacts, and a per-job child supervisor. It is not an unrestricted public sandbox, live-trading system, hardware-control platform, malware laboratory, multi-cloud autoscaler, or broad multi-runtime platform.
 
-## Phase 2: Virtual File System & Strong Isolation
-- [x] Per-execution TempDir / temporary workspace with auto-cleanup
-- [x] Path traversal protection + canonicalize
-- [ ] chroot / pivot_root implementation
-- [ ] Mount namespace + OverlayFS or tmpfs
-- [ ] Network policy enforcement (default deny + optional whitelist)
-- [ ] User namespace (rootless)
-- [ ] Refined seccomp profiles per language
-- [ ] Integration tests for isolation (path traversal, network, etc.)
+## Current repository progress
 
-## Phase 3: High-Performance API Server
-- [x] Axum server router skeleton (`/health`, `/v1/execute`)
-- [x] Runnable server binary and graceful shutdown
-- [x] POST `/v1/execute/async` + job ID
-- [x] GET `/v1/executions/:id`
-- [x] WebSocket `/v1/stream`
-- [ ] Warm worker pool + idle timeout
-- [x] Request validation middleware and request IDs
-- [x] Global API rate limiting (10 requests/second, burst 20)
-- [x] Bounded concurrent execution admission with overload responses and duplicate async ID protection
-- [x] Bounded completed-job history with oldest-result eviction
-- [x] In-memory result storage (DashMap)
-- [x] Authenticated async job ownership checks for status and WebSocket routes
+The repository already contains a Rust workspace, shared execution contracts, WASM and JavaScript adapters, a Python child adapter, cgroup v2 foundations, bounded API admission/history, request IDs, authentication, per-principal quotas, async job ownership, Prometheus metrics, OpenAI-compatible model access, bounded ReAct execution, Docker health checks, and a fail-closed child-hardening foundation for Linux namespaces, `RLIMIT_NOFILE`, `PR_SET_NO_NEW_PRIVS`, and capability clearing.
 
-## Phase 4: Autonomous AI Agent & Self-Healing
-- [x] Provider-neutral `execute_code` tool trait
-- [x] Provider-neutral LLM client abstraction and OpenAI-compatible Chat Completions provider
-- [x] Bounded ReAct / self-correction loop (1–10 execution cap, `network: deny` request policy, bounded tool feedback; OS-level enforcement remains pending)
-- [ ] Stateful sessions + optional persistent workspace
-- [ ] End-to-end self-healing test
+The child-hardening foundation is not yet wired into a dedicated runtime supervisor. The pinned seccomp dependency is currently a placeholder, so production execution must remain fail-closed until a real runtime-specific seccomp-BPF backend, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision are implemented and tested in a disposable Linux environment.
 
-## Phase 5: Security Hardening & Production
-- [x] Optional API key authentication (`CORTEXENV_API_KEY`)
-- [x] JWT support (optional)
-- [x] Per-authenticated-principal concurrent execution quota
-- [x] In-memory per-authenticated-principal request rate limit
-- [ ] Durable usage quota accounting
-- [x] Penetration testing checklist (`docs/security-testing.md`)
-- [x] Prometheus-compatible metrics endpoint and execution counters
-- [ ] OpenTelemetry traces
-- [x] Multi-stage non-root Dockerfile and `docker-compose.yml`
-- [x] Health checks + graceful shutdown
-- [x] Architecture documentation
+> ရည်ရွယ်ချက် — Private AI Data Analyst အတွက် လုံခြုံပြီး self-hosted execution platform MVP တစ်ခုကို အရင်ဆုံး production pilot အထိ ပြီးမြောက်စေရန်။
+> ပထမဆုံး deployment: **trusted internal / private enterprise single-node**
+> ပထမဆုံး runtime: **Python + WASM**
+> Network: **deny by default**
+> မလုပ်သေးသည့်အရာများ: unrestricted public sandbox, live trading, hardware control, malware lab, multi-cloud autoscaling, runtime/framework အများကြီး။
 
-## Cross-Cutting
-- [x] Observability dependency and tracing hooks from Phase 1
-- [x] In-process multi-tenancy boundary: principal-scoped async job access and execution/request quotas (durable/distributed accounting remains pending)
-- [ ] Rootless support
-- [x] Comprehensive error messages without leaking host information
+## Phase 0 — Product Scope, Threat Model, and Release Policy
 
-## Distribution
-- [x] Cross-platform `cortexenv` binary name
-- [x] Windows release build (`cortexenv-windows-x86_64.exe`)
-- [x] Debian packaging metadata with `cargo-deb`
-- [x] Tag-based GitHub Release workflow for Windows and Debian artifacts
+### Goal ဘာကို လုံခြုံစွာ support လုပ်မလဲ၊ ဘာကို မလုပ်နိုင်သေးဘူးလဲဆိုတာ တိတိကျကျ သတ်မှတ်ရန်။
+- [ ] ပထမဆုံး product ကို **Private AI Data Analyst** အဖြစ် အတည်ပြုရန်
+- [ ] ပထမဆုံး user persona သတ်မှတ်ရန် — internal analyst, developer, operator
+- [ ] Top 5 user workflows ရေးရန်
+- [ ] Dataset upload
+- [ ] Natural-language analysis request
+- [ ] Python analysis execution
+- [ ] Chart/table/report generation
+- [ ] Artifact download and history review
+- [ ] Deployment mode ကို single-node private deployment အဖြစ် သတ်မှတ်ရန်
+- [ ] Supported runtime ကို Python + WASM အဖြစ် သတ်မှတ်ရန်
+- [ ] Supported file types သတ်မှတ်ရန် — CSV, JSON, Parquet, PNG, HTML/PDF report
+- [ ] Unsupported workload များ သတ်မှတ်ရန်
+- [ ] Unrestricted internet access
+- [ ] Arbitrary package installation
+- [ ] Host filesystem access
+- [ ] Hardware/device access
+- [ ] Live trading or financial account access
+- [ ] Active network testing
+- [ ] Threat model ရေးရန် — malicious code, malicious file, prompt injection, secret leakage, tenant/job crossover
+- [ ] Security modes သတ်မှတ်ရန် — `trusted`, `restricted`, `hostile-code`
+- [ ] MVP အတွက် security claim နှင့် limitation များ ရေးရန်
+- [ ] Data classification, retention, deletion policy သတ်မှတ်ရန်
+- [ ] Security decision record template ထည့်ရန်
+- [ ] MVP acceptance criteria ရေးရန်
+
+### Exit gate
+
+- Product scope တစ်မျိုးတည်း အတည်ပြုပြီး
+- Threat model နှင့် limitation document ရှိပြီး
+- Supported/unsupported workload များ review ပြီး
+
+## Phase 1 — Universal Execution Contract and API Foundation
+
+### Goal Local/remote နောက်ပိုင်း မပြောင်းလဲဘဲ သုံးနိုင်မည့် versioned execution contract တည်ဆောက်ရန်။
+- [ ] `ExecutionRequest` schema ကို version လုပ်ရန်
+- [ ] `ExecutionResult` schema ကို version လုပ်ရန်
+- [ ] `runtime`, `runtime_version`, `mode`, `entrypoint`, `workspace`, `network`, `resources`, `artifacts`, `target` fields ထည့်ရန်
+- [ ] `target: local | remote` ကို contract ထဲထည့်ပြီး implementation ကို နောက်ပိုင်းခွဲရန်
+- [ ] `mode: analyze | script | build | test` အနက် MVP အတွက် `analyze` နှင့် `script` သတ်မှတ်ရန်
+- [ ] Explicit job states သတ်မှတ်ရန်
+- [ ] queued
+- [ ] starting
+- [ ] running
+- [ ] completed
+- [ ] failed
+- [ ] timed_out
+- [ ] cancelled
+- [ ] expired
+- [ ] Stable machine-readable error codes သတ်မှတ်ရန်
+- [ ] Timeout, CPU, memory, process, disk, output-limit semantics ရေးရန်
+- [ ] Artifact manifest နှင့် checksum format သတ်မှတ်ရန်
+- [ ] OpenAPI v1 specification ရေးပြီး freeze လုပ်ရန်
+- [ ] Compatibility and deprecation policy ရေးရန်
+- [ ] API contract tests ထည့်ရန်
+
+### Exit gate
+
+- Schema, error codes, job states, OpenAPI v1 freeze ပြီး
+- Client/server contract test အားလုံး pass ဖြစ်ပြီး
+
+## Phase 2 — Secure Child Supervisor and Linux Isolation
+
+### Goal Untrusted code ကို API process ထဲတွင် မလုပ်ဘဲ fail-closed child supervisor မှတစ်ဆင့် အထီးကျန် run စေရန်။
+- [ ] Per-execution child supervisor တည်ဆောက်ရန်
+- [ ] Request validation ကို child spawn မလုပ်မီ အပြီးလုပ်ရန်
+- [ ] Private per-execution workspace ဖန်တီးရန်
+- [ ] Source release မလုပ်မီ cgroup v2 ဖန်တီးရန်
+- [ ] Child နှင့် descendants များကို cgroup ထဲ attach လုပ်ရန်
+- [ ] CPU, memory, swap, pids limits enforce လုပ်ရန်
+- [ ] User namespace နှင့် unprivileged UID/GID mapping ထည့်ရန်
+- [ ] Mount namespace ထည့်ရန်
+- [ ] PID namespace ထည့်ရန်
+- [ ] Network namespace ထည့်ရန်
+- [ ] Minimal read-only runtime root ထည့်ရန်
+- [ ] Writable workspace mount သီးခြားထားရန်
+- [ ] Host paths, secrets, Docker socket, application data မ inheritance ဖြစ်စေရန်
+- [ ] `PR_SET_NO_NEW_PRIVS` သတ်မှတ်ရန်
+- [ ] Linux capabilities drop လုပ်ရန်
+- [ ] Runtime-specific seccomp profile ထည့်ရန်
+- [ ] Default-deny network policy enforce လုပ်ရန်
+- [ ] Filesystem access ကို explicit workspace/input/output mount များထဲတွင် ကန့်သတ်ရန်
+- [ ] Process-tree cancellation နှင့် descendant cleanup ထည့်ရန်
+- [ ] cgroup kill support အသုံးပြုရန်
+- [ ] Stdout/stderr backpressure ထည့်ရန်
+- [ ] Output size cap ထည့်ရန်
+- [ ] Required isolation control မရှိပါက fail closed လုပ်ရန်
+- [ ] Trusted-development mode နှင့် restricted/production mode ခွဲထားရန်
+
+### Exit gate
+
+- Supervisor မပါဘဲ production mode မ run နိုင်ရန်
+- Isolation control ပျက်ပါက request ကို block လုပ်ရန်
+- API process crash မဖြစ်ဘဲ child failure ကို handle လုပ်နိုင်ရန်
+
+## Phase 3 — Python and WASM Runtime Profiles
+
+### Goal Runtime နှစ်ခုကိုသာ security profile ပြည့်စုံစွာ ထောက်ပံ့ရန်။
+- [ ] Python runtime startup command သတ်မှတ်ရန်
+- [ ] Python process-group cleanup ထည့်ရန်
+- [ ] Python environment template သတ်မှတ်ရန်
+- [ ] Allowlisted packages ထည့်ရန် — pandas, polars, numpy, matplotlib, scipy လိုအပ်သလောက်
+- [ ] Package installation ကို default ပိတ်ရန်
+- [ ] WASM/WASI runtime profile သတ်မှတ်ရန်
+- [ ] WASM epoch timeout ထည့်ရန်
+- [ ] WASM memory limit enforce လုပ်ရန်
+- [ ] Per-runtime filesystem/network policy သတ်မှတ်ရန်
+- [ ] Per-runtime resource profile သတ်မှတ်ရန်
+- [ ] Runtime version pinning ထည့်ရန်
+- [ ] Runtime capability discovery ထည့်ရန်
+- [ ] Runtime startup, signal, timeout behavior document လုပ်ရန်
+- [ ] Unsupported runtime request ကို clear error ဖြင့် reject လုပ်ရန်
+
+### Exit gate
+
+- Python နှင့် WASM တို့အတွက် behavior matrix ပြီး
+- Version pinning နှင့် resource/security profile test pass ဖြစ်ပြီး
+
+## Phase 4 — Security Integration and Adversarial Testing
+
+### Goal Security claim တစ်ခုချင်းစီအတွက် automated evidence ရှိစေရန်။
+> Hostile-code tests များကို disposable, unprivileged Linux VM သို့မဟုတ် isolated CI runner တွင်သာ run ရန်။
+- [ ] Namespace visibility test ထည့်ရန်
+- [ ] Unprivileged identity test ထည့်ရန်
+- [ ] Absolute path escape test ထည့်ရန်
+- [ ] Path traversal test ထည့်ရန်
+- [ ] Symlink escape test ထည့်ရန်
+- [ ] Mount boundary test ထည့်ရန်
+- [ ] Workspace ပြင်ပ read/write test ထည့်ရန်
+- [ ] Host secret visibility test ထည့်ရန်
+- [ ] Docker socket visibility test ထည့်ရန်
+- [ ] Network deny test — TCP, UDP, DNS, IPv4, IPv6
+- [ ] Proxy bypass test ထည့်ရန်
+- [ ] CPU exhaustion test ထည့်ရန်
+- [ ] Memory/swap exhaustion test ထည့်ရန်
+- [ ] Fork bomb/PID exhaustion test ထည့်ရန်
+- [ ] File descriptor exhaustion test ထည့်ရန်
+- [ ] Disk/temp-file quota test ထည့်ရန်
+- [ ] Stdout/stderr flood test ထည့်ရန်
+- [ ] Compile/startup/execution/shutdown timeout test ထည့်ရန်
+- [ ] Seccomp deny test ထည့်ရန်
+- [ ] Capability and privilege-escalation test ထည့်ရန်
+- [ ] Child crash/kill နောက် API process survival test ထည့်ရန်
+- [ ] Concurrent execution isolation test ထည့်ရန်
+- [ ] Cross-principal job/result access test ထည့်ရန်
+- [ ] Request parser နှင့် runtime adapter fuzz test ထည့်ရန်
+- [ ] Dependency audit, SBOM, image scan, secret scan ထည့်ရန်
+- [ ] Security claim → test → evidence matrix ပြုလုပ်ရန်
+- [ ] Independent security review ပြုလုပ်ရန်
+- [ ] Known limitations နှင့် disclosure policy ထုတ်ပြန်ရန်
+
+### Exit gate
+
+- Critical isolation test များ အားလုံး pass ဖြစ်ပြီး
+- Known critical/high findings မကျန်ရှိဘဲ
+- Security reviewer sign-off ရရှိပြီး
+
+## Phase 5 — Reliable Job API and Durable Storage
+
+### Goal Restart ပြီးနောက် jobs, artifacts, audit information မပျောက်စေရန်။
+- [ ] Queue နှင့် execution worker ကို ခွဲရန်
+- [ ] Durable job records ထည့်ရန်
+- [ ] Explicit state transition validation ထည့်ရန်
+- [ ] Job cancellation API ထည့်ရန်
+- [ ] Supervisor cancellation path ချိတ်ရန်
+- [ ] Idempotency key ထည့်ရန်
+- [ ] Safe retry behavior သတ်မှတ်ရန်
+- [ ] Queue backpressure ထည့်ရန်
+- [ ] Orphan-job recovery ထည့်ရန်
+- [ ] Worker heartbeat ထည့်ရန်
+- [ ] Graceful draining ထည့်ရန်
+- [ ] PostgreSQL သို့မဟုတ် equivalent durable database ထည့်ရန်
+- [ ] Object storage ထည့်ရန်
+- [ ] Artifact metadata, checksum, expiry ထည့်ရန်
+- [ ] Execution history pagination ထည့်ရန်
+- [ ] Retention and deletion worker ထည့်ရန်
+- [ ] Backup and restore procedure ရေးရန်
+- [ ] Restore drill တကယ် run ရန်
+- [ ] Database migration rollback test ထည့်ရန်
+
+### Exit gate
+
+- Service restart နောက် job/result/artifact မပျောက်ရန်
+- Cancel, retry, timeout, recovery flow အားလုံး test pass ဖြစ်ရန်
+- Backup restore test အောင်မြင်ရန်
+
+## Phase 6 — Authentication, Authorization, Audit, and Quota
+
+### Goal User/job/organization data များကို မှန်ကန်စွာ ခွဲခြားထိန်းချုပ်ရန်။
+- [ ] User, organization, project, service account model သတ်မှတ်ရန်
+- [ ] API key authentication ထည့်ရန်
+- [ ] JWT/OIDC ကို pilot မတိုင်မီ ထည့်ရန်
+- [ ] User, developer, operator, administrator roles သတ်မှတ်ရန်
+- [ ] Role-based authorization ထည့်ရန်
+- [ ] Per-user/project/organization quota ထည့်ရန်
+- [ ] Distributed rate limit လိုအပ်ချက် သတ်မှတ်ရန်
+- [ ] Job, workspace, file, artifact ownership checks ထည့်ရန်
+- [ ] Audit event schema သတ်မှတ်ရန်
+- [ ] Login, execution, download, policy change, deletion event များ audit လုပ်ရန်
+- [ ] Audit log append-only policy သတ်မှတ်ရန်
+- [ ] Logs, artifacts, stdout/stderr ထဲ secret redaction ထည့်ရန်
+- [ ] Tenant-isolation tests ထည့်ရန်
+- [ ] Data retention and deletion enforcement ထည့်ရန်
+
+### Exit gate
+
+- User A က User B ၏ job/file/artifact/log မမြင်နိုင်ရန်
+- Audit event များ ပြန်စစ်နိုင်ရန်
+- Quota နှင့် authorization test pass ဖြစ်ရန်
+
+## Phase 7 — Observability and Operations
+
+### Goal Production pilot ကို စောင့်ကြည့်၊ ပြန်လည်ပြုပြင်၊ incident ဖြေရှင်းနိုင်ရန်။
+- [ ] Structured JSON logs ထည့်ရန်
+- [ ] Request, execution, job, tenant, trace correlation ID ထည့်ရန်
+- [ ] OpenTelemetry traces ထည့်ရန်
+- [ ] Metrics ထည့်ရန်
+- [ ] Queue latency
+- [ ] Cold start
+- [ ] Runtime duration
+- [ ] Timeout count
+- [ ] Isolation failure
+- [ ] Resource kill
+- [ ] Artifact upload/download
+- [ ] Error rate
+- [ ] Metrics endpoint ကို private/authenticated လုပ်ရန်
+- [ ] Dashboards ထည့်ရန်
+- [ ] Alert rules ထည့်ရန်
+- [ ] Startup configuration validation ထည့်ရန်
+- [ ] Safe defaults သတ်မှတ်ရန်
+- [ ] TLS/reverse proxy deployment guide ရေးရန်
+- [ ] Release artifacts pin/sign/scan လုပ်ရန်
+- [ ] Incident response runbook ရေးရန်
+- [ ] Upgrade/rollback runbook ရေးရန်
+- [ ] Capacity planning guide ရေးရန်
+- [ ] SLO သတ်မှတ်ရန် — availability, completion, latency, isolation failure
+
+### Exit gate
+
+- Operator တစ်ယောက်က dashboard နှင့် logs ဖြင့် failure ကို ရှာနိုင်ရန်
+- Incident, rollback, restore procedure များ လက်တွေ့စမ်းပြီးဖြစ်ရန်
+
+## Phase 8 — Private AI Data Analyst MVP Web Application
+
+### Goal Login မှ result/export အထိ user workflow တစ်ခုလုံး အဆုံးမှအဆုံး ပြီးစီးရန်။
+- [ ] Web frontend project ဖန်တီးရန်
+- [ ] Versioned CortexEnv API client ထည့်ရန်
+- [ ] Login/logout/session management ထည့်ရန်
+- [ ] Organization/project selection ထည့်ရန်
+- [ ] Workspace creation ထည့်ရန်
+- [ ] CSV/JSON/Parquet upload ထည့်ရန်
+- [ ] File size/type validation ထည့်ရန်
+- [ ] Python analysis workspace ထည့်ရန်
+- [ ] Natural-language AI chat interface ထည့်ရန်
+- [ ] File attachment နှင့် tool/execution activity ပြရန်
+- [ ] Run, stop, cancel, retry, rerun controls ထည့်ရန်
+- [ ] Live stdout/stderr console ထည့်ရန်
+- [ ] WebSocket reconnect နှင့် polling fallback ထည့်ရန်
+- [ ] Table result rendering ထည့်ရန်
+- [ ] Chart/image result rendering ထည့်ရန်
+- [ ] HTML/PDF report artifact rendering ထည့်ရန်
+- [ ] Artifact download ထည့်ရန်
+- [ ] Execution history, search, filter, pagination ထည့်ရန်
+- [ ] Timeout/resource/isolation error ကို user နားလည်အောင် ပြရန်
+- [ ] User/team usage and quota dashboard ထည့်ရန်
+- [ ] Data deletion/export control ထည့်ရန်
+- [ ] English/Burmese localization ထည့်ရန်
+- [ ] Accessibility နှင့် responsive layout စစ်ရန်
+- [ ] Frontend unit/integration/E2E tests ထည့်ရန်
+
+### Exit gate
+
+- Test user တစ်ယောက်သည် login → upload → ask → execute → view → download workflow ကို အောင်မြင်စွာ ပြီးစီးနိုင်ရန်
+
+## Phase 9 — AI Agent Guardrails and Data-Analysis Quality
+
+### Goal AI agent က ပြင်ပ data, tools, secrets များကို မထိန်းချုပ်နိုင်ဘဲ ပြန်လည်ပြင်ဆင်နိုင်သော analysis workflow တည်ဆောက်ရန်။
+- [ ] Agent step/time/token/execution budgets ထည့်ရန်
+- [ ] AI-generated code ကို untrusted input အဖြစ် သတ်မှတ်ရန်
+- [ ] Execution output မှ prompt injection boundary ထည့်ရန်
+- [ ] Tool allowlist ထည့်ရန်
+- [ ] File read/write policy ထည့်ရန်
+- [ ] External network request ကို default ပိတ်ရန်
+- [ ] Secret access ကို default ပိတ်ရန်
+- [ ] Destructive action approval gate ထည့်ရန်
+- [ ] Error → repair → rerun → final result flow ထည့်ရန်
+- [ ] Partial result behavior သတ်မှတ်ရန်
+- [ ] Model/provider config ကို secret မ hard-code ဘဲ ထည့်ရန်
+- [ ] AI result reproducibility metadata ထည့်ရန်
+- [ ] Prompt, model, runtime, template, policy version မှတ်တမ်းတင်ရန်
+- [ ] Data-analysis correctness sample suite ထည့်ရန်
+- [ ] Hallucinated result warning ထည့်ရန်
+- [ ] User approval မရှိဘဲ result ကို final အဖြစ် မတင်ရန်
+
+### Exit gate
+
+- Common analysis tasks အတွက် success rate သတ်မှတ်ချက် ပြည့်မီရန်
+- Prompt injection နှင့် unsafe tool-call tests pass ဖြစ်ရန်
+
+## Phase 10 — Trusted Pilot and Release Gate
+
+### Goal Controlled users နှင့် production-like private environment တွင် pilot လုပ်ရန်။
+- [ ] Pilot environment သီးခြားတည်ဆောက်ရန်
+- [ ] 5–10 trusted users ရွေးရန်
+- [ ] Sample datasets နှင့် real-but-approved datasets ပြင်ဆင်ရန်
+- [ ] Onboarding guide ရေးရန်
+- [ ] Privacy, retention, acceptable-use notice ထုတ်ပြန်ရန်
+- [ ] Support and issue-triage process သတ်မှတ်ရန်
+- [ ] Pilot metrics စုရန်
+- [ ] Task success rate
+- [ ] Completion rate
+- [ ] Median/p95 latency
+- [ ] Timeout rate
+- [ ] Failure recovery rate
+- [ ] Cost per successful task
+- [ ] User satisfaction
+- [ ] Security regression suite ကို pilot release မတိုင်မီ run ရန်
+- [ ] Backup/restore ကို pilot data ဖြင့် verify လုပ်ရန်
+- [ ] Pilot blockers ပြင်ရန်
+- [ ] Operating procedures update လုပ်ရန်
+- [ ] External beta မလုပ်မီ security release gate pass ဖြစ်ကြောင်း အတည်ပြုရန်
+
+### End-user readiness gate
+- [ ] Security mode နှင့် deployment assumptions ရှင်းလင်းပြီး
+- [ ] Required isolation controls မရှိပါက fail closed ဖြစ်ပြီး
+- [ ] Security integration tests pass ဖြစ်ပြီး
+- [ ] API v1, schema, SDK contract versioned ဖြစ်ပြီး
+- [ ] Jobs, files, artifacts, audit events restart ပြီးနောက် survive ဖြစ်ပြီး
+- [ ] Backup/restore tested ဖြစ်ပြီး
+- [ ] Monitoring, alerts, runbooks ပြီးပြီး
+- [ ] GUI တွင် login, upload, execution, output, history, export ပြည့်စုံပြီး
+- [ ] Error/reconnect behavior tested ဖြစ်ပြီး
+- [ ] Privacy, retention, deletion, acceptable-use policy ထုတ်ပြန်ပြီး
+- [ ] Installation/upgrade documentation ပြီးပြီး
+- [ ] Reference product trusted pilot အောင်မြင်ပြီး
+- [ ] Limitations ကို README/product documentation တွင် ရိုးသားစွာ ဖော်ပြပြီး
+
+# Deferred Backlog — MVP ပြီးမှသာ စဉ်းစားရန်
+
+## Runtime expansion
+- [ ] JavaScript/TypeScript
+- [ ] Shell/Bash
+- [ ] R/Julia
+- [ ] C/C++/Rust/Go build profiles
+- [ ] Notebook execution
+- [ ] Separate build environment and run environment
+
+## Deployment expansion
+- [ ] Multi-node worker pool
+- [ ] Redis and distributed queue
+- [ ] Kubernetes/Helm
+- [ ] Autoscaling
+- [ ] Terraform examples
+- [ ] Multi-region/data residency
+
+## Developer integrations
+- [ ] Python SDK
+- [ ] TypeScript SDK
+- [ ] MCP server
+- [ ] VS Code extension
+- [ ] Jupyter integration
+- [ ] GitHub Actions/GitLab CI
+- [ ] n8n/Airflow/Temporal integrations
+
+## Desktop/offline
+- [ ] Tauri desktop app
+- [ ] Local engine lifecycle
+- [ ] Offline package/model cache
+- [ ] Windows/macOS/Linux packages
+- [ ] Local/remote synchronization
+
+## Advanced domain profiles
+- [ ] Web framework templates
+- [ ] GPU/ML profiles
+- [ ] Cybersecurity lab
+- [ ] IoT/device gateway
+- [ ] Robotics simulation
+- [ ] Agriculture analytics
+- [ ] Finance simulation
+- [ ] Live hardware or live trading — separate approved product only
+
+# Recommended first release definition **CortexEnv v0.1 Private Analyst**
+- Single-node private deployment
+- Python + WASM only
+- CSV/JSON/Parquet input
+- pandas/Polars/NumPy/Matplotlib profile
+- Default-deny network
+- Per-job child supervisor
+- cgroup + namespace + seccomp isolation
+- Durable jobs and artifacts
+- Login, upload, execute, live output, report download
+- Audit log and usage quota
+- Trusted pilot only
+- No unrestricted public hostile-code claim

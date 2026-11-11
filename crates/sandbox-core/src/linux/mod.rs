@@ -6,7 +6,9 @@
 #![cfg(target_os = "linux")]
 
 mod cgroup;
+mod supervisor;
 pub use cgroup::{detect_cgroup_v2, CgroupLimits, CgroupV2};
+pub use supervisor::{apply_child_isolation, ChildIsolationConfig};
 
 use sandbox_common::{ResourceLimits, SandboxError};
 

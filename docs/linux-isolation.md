@@ -19,6 +19,12 @@ On Linux, `sandbox-core::linux` provides a fail-closed cgroup v2 controller mana
 
 `linux::isolation_plan` also records the intended child namespace set (user, mount, PID, network, UTS, and IPC), network-deny policy, and runtime seccomp profile selection without changing the current process.
 
+## Child-hardening foundation
+
+`sandbox-core::linux::apply_child_isolation` is now the child-only hardening entry point. It validates the request, requests the user/mount/PID/network/UTS/IPC namespaces, applies `RLIMIT_NOFILE`, sets `PR_SET_NO_NEW_PRIVS`, and clears effective, permitted, inheritable, ambient, and bounding capabilities. It is not called from the API process and it does not launch a runtime.
+
+The function currently fails closed when seccomp is required because the pinned `seccompiler` 0.1.0 dependency in this repository is a placeholder without a BPF filter API. This is intentional: the code must not claim seccomp protection or run user code without a real filter. The next implementation step is to replace that dependency/backend and wire this entry point into a dedicated child supervisor with UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision.
+
 ## Required child-supervisor sequence
 
 1. Validate the request and create a private execution workspace.
