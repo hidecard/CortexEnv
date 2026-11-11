@@ -85,9 +85,9 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 
 ### Goal Untrusted code ကို API process ထဲတွင် မလုပ်ဘဲ fail-closed child supervisor မှတစ်ဆင့် အထီးကျန် run စေရန်။
 - [ ] Per-execution child supervisor တည်ဆောက်ရန်
-- [ ] Request validation ကို child spawn မလုပ်မီ အပြီးလုပ်ရန်
-- [ ] Private per-execution workspace ဖန်တီးရန်
-- [ ] Source release မလုပ်မီ cgroup v2 ဖန်တီးရန်
+- [x] Request validation ကို child spawn မလုပ်မီ အပြီးလုပ်ရန်
+- [x] Private per-execution workspace ဖန်တီးရန်
+- [x] Source release မလုပ်မီ cgroup v2 ဖန်တီးရန်
 - [ ] Child နှင့် descendants များကို cgroup ထဲ attach လုပ်ရန်
 - [ ] CPU, memory, swap, pids limits enforce လုပ်ရန်
 - [ ] User namespace နှင့် unprivileged UID/GID mapping ထည့်ရန်
