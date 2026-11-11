@@ -21,6 +21,8 @@ cargo test --workspace
 
 The current tests cover request validation, backward-compatible decoding and range checks for CPU quotas, cgroup `cpu.max` mapping, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key/JWT protection, request IDs, async duplicate IDs, principal-scoped async job ownership, bounded global and per-principal execution admission/history/rate limiting, sanitized runtime errors, WASM timeout interruption and request-bounded linear-memory growth, JavaScript console capture/error/deadline behavior, and Python stdout/stderr/exit status/deadline/output caps plus unsupported network-policy rejection. Linux tests verify the Python launcher waits for the parent to attach it before `exec`, and missing cgroup controller files fail before user source runs. On Linux targets with `waitid(WNOWAIT)` support, Python timeout/exit cleanup kills descendants in its process group; a configured cgroup additionally uses `cgroup.kill` when available. Without a configured cgroup or supported `cgroup.kill`, escaped descendants and host network/filesystem isolation are not contained.
 
+The `sandbox-core::security` tests cover parsing `trusted`, `restricted`/`production`, and `hostile-code` modes and verify that only trusted development mode permits the current in-process adapters. A deployment smoke check should set `CORTEXENV_SECURITY_MODE=restricted` and confirm execution is rejected before runtime startup.
+
 ## Phase 1 smoke scripts
 
 The following scripts are safe prerequisite probes, not a production security certification:

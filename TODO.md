@@ -8,6 +8,8 @@ The repository already contains a Rust workspace, shared execution contracts, WA
 
 The child-hardening foundation is not yet wired into a dedicated runtime supervisor. The pinned seccomp dependency is currently a placeholder, so production execution must remain fail-closed until a real runtime-specific seccomp-BPF backend, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision are implemented and tested in a disposable Linux environment.
 
+The runtime now exposes `CORTEXENV_SECURITY_MODE`: `trusted` is development-only, while `restricted`/`production`/`hostile-code` fail closed before any current adapter starts. This prevents an operator from accidentally treating the in-process adapters as a production sandbox, but it does not replace the dedicated child supervisor.
+
 Phase 1 test scripts are available under [`scripts/security`](scripts/security/): they run safe unit checks, a forked-child kernel seccomp primitive probe, an opt-in namespace/user-mapping probe, and a read-only cgroup v2 delegated-root preflight. These scripts provide prerequisite evidence only; they do not mark the production supervisor or runtime-specific seccomp profile complete.
 
 > ရည်ရွယ်ချက် — Private AI Data Analyst အတွက် လုံခြုံပြီး self-hosted execution platform MVP တစ်ခုကို အရင်ဆုံး production pilot အထိ ပြီးမြောက်စေရန်။
@@ -105,11 +107,11 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [ ] Stdout/stderr backpressure ထည့်ရန်
 - [ ] Output size cap ထည့်ရန်
 - [ ] Required isolation control မရှိပါက fail closed လုပ်ရန်
-- [ ] Trusted-development mode နှင့် restricted/production mode ခွဲထားရန်
+- [x] Trusted-development mode နှင့် restricted/production mode ခွဲထားရန်
 
 ### Exit gate
 
-- Supervisor မပါဘဲ production mode မ run နိုင်ရန်
+- [x] Supervisor မပါဘဲ explicit restricted/production/hostile-code mode မ run နိုင်ရန်
 - Isolation control ပျက်ပါက request ကို block လုပ်ရန်
 - API process crash မဖြစ်ဘဲ child failure ကို handle လုပ်နိုင်ရန်
 

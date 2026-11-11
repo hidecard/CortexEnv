@@ -3,7 +3,7 @@
 #![warn(missing_docs)]
 
 use sandbox_common::{ExecutionRequest, ExecutionResult, Language, SandboxError};
-use sandbox_core::{log_execution_start, SandboxEngine};
+use sandbox_core::{log_execution_start, security::SecurityMode, SandboxEngine};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -43,6 +43,10 @@ impl Runtime {
         request: ExecutionRequest,
     ) -> Result<ExecutionResult, SandboxError> {
         self.engine.validate(&request)?;
+        // The current adapters are not yet behind the dedicated OS child
+        // supervisor. Production-oriented modes therefore fail closed before
+        // any WASM, JavaScript, or Python code is started.
+        SecurityMode::configured()?.ensure_in_process_execution_allowed()?;
         log_execution_start(&request);
         match request.language {
             Language::Wasm => self.execute_wasm(request).await,

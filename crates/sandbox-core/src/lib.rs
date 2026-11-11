@@ -9,6 +9,9 @@ use std::{
 use tempfile::{tempdir, TempDir};
 use tracing::debug;
 
+/// Deployment security-mode selection and fail-closed execution gate.
+pub mod security;
+
 /// Linux-only cgroup v2 and child-supervisor isolation contracts.
 #[cfg(target_os = "linux")]
 pub mod linux;

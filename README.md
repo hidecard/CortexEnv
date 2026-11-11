@@ -349,6 +349,8 @@ The [security testing checklist](docs/security-testing.md) separates current aut
 
 JavaScript runs in an in-process V8 isolate with a minimal console-only op set; the V8 deadline can terminate synchronous script execution, but OS memory/process limits are not enforced. Python runs as a direct child with isolated interpreter startup, a temporary working directory, cleared inherited environment, a deadline, and bounded captured output. It can still access files and network available to the service account and can spawn descendants that are not killed with the parent. Do not execute hostile or untrusted JavaScript/Python in the current implementation.
 
+The runtime now has an explicit `CORTEXENV_SECURITY_MODE` gate. `trusted` (the backwards-compatible development default) permits the current adapters; `restricted`, `production`, and `hostile-code` fail closed with an isolation error until the dedicated OS child supervisor is wired and its controls are active. Production deployments must set `CORTEXENV_SECURITY_MODE=restricted` rather than relying on the development default.
+
 - PID, mount, network, UTS, IPC, and user namespaces
 - cgroup CPU, memory, process, and file-descriptor enforcement
 - seccomp syscall filtering and capability dropping
@@ -366,7 +368,7 @@ The authoritative roadmap is tracked in [`TODO.md`](TODO.md). It preserves compl
 
 The next implementation gate is a real Linux child supervisor in `sandbox-core`. It must create the required namespaces, apply the existing cgroup limits before source execution, configure seccomp and capabilities, mount a minimal filesystem, supervise the complete child cgroup, and pass disposable-environment integration checks. The current `LinuxIsolationPlan` is only a fail-closed design/validation layer; it is not proof that those operating-system controls are active.
 
-The [Linux isolation boundary](docs/linux-isolation.md) documents the implemented cgroup v2 foundation, Python process supervision, required supervisor sequence, and explicit reasons the current runtimes must not receive hostile workloads. The [security testing checklist](docs/security-testing.md) distinguishes safe automated tests from checks that must run only inside a disposable VM.
+The [Linux isolation boundary](docs/linux-isolation.md) documents the implemented cgroup v2 foundation, child-hardening gate, Python process supervision, required supervisor sequence, and explicit reasons the current runtimes must not receive hostile workloads. The [security testing checklist](docs/security-testing.md) distinguishes safe automated tests from checks that must run only inside a disposable VM.
 
 ## License
 
