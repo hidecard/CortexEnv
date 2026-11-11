@@ -21,30 +21,30 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 ## Phase 0 — Product Scope, Threat Model, and Release Policy
 
 ### Goal ဘာကို လုံခြုံစွာ support လုပ်မလဲ၊ ဘာကို မလုပ်နိုင်သေးဘူးလဲဆိုတာ တိတိကျကျ သတ်မှတ်ရန်။
-- [ ] ပထမဆုံး product ကို **Private AI Data Analyst** အဖြစ် အတည်ပြုရန်
-- [ ] ပထမဆုံး user persona သတ်မှတ်ရန် — internal analyst, developer, operator
-- [ ] Top 5 user workflows ရေးရန်
-- [ ] Dataset upload
-- [ ] Natural-language analysis request
-- [ ] Python analysis execution
-- [ ] Chart/table/report generation
-- [ ] Artifact download and history review
-- [ ] Deployment mode ကို single-node private deployment အဖြစ် သတ်မှတ်ရန်
-- [ ] Supported runtime ကို Python + WASM အဖြစ် သတ်မှတ်ရန်
-- [ ] Supported file types သတ်မှတ်ရန် — CSV, JSON, Parquet, PNG, HTML/PDF report
-- [ ] Unsupported workload များ သတ်မှတ်ရန်
-- [ ] Unrestricted internet access
-- [ ] Arbitrary package installation
-- [ ] Host filesystem access
-- [ ] Hardware/device access
-- [ ] Live trading or financial account access
-- [ ] Active network testing
-- [ ] Threat model ရေးရန် — malicious code, malicious file, prompt injection, secret leakage, tenant/job crossover
-- [ ] Security modes သတ်မှတ်ရန် — `trusted`, `restricted`, `hostile-code`
-- [ ] MVP အတွက် security claim နှင့် limitation များ ရေးရန်
-- [ ] Data classification, retention, deletion policy သတ်မှတ်ရန်
-- [ ] Security decision record template ထည့်ရန်
-- [ ] MVP acceptance criteria ရေးရန်
+- [x] ပထမဆုံး product ကို **Private AI Data Analyst** အဖြစ် အတည်ပြုရန်
+- [x] ပထမဆုံး user persona သတ်မှတ်ရန် — internal analyst, developer, operator
+- [x] Top 5 user workflows ရေးရန်
+- [x] Dataset upload
+- [x] Natural-language analysis request
+- [x] Python analysis execution
+- [x] Chart/table/report generation
+- [x] Artifact download and history review
+- [x] Deployment mode ကို single-node private deployment အဖြစ် သတ်မှတ်ရန်
+- [x] Supported runtime ကို Python + WASM အဖြစ် သတ်မှတ်ရန်
+- [x] Supported file types သတ်မှတ်ရန် — CSV, JSON, Parquet, PNG, HTML/PDF report
+- [x] Unsupported workload များ သတ်မှတ်ရန်
+- [x] Unrestricted internet access
+- [x] Arbitrary package installation
+- [x] Host filesystem access
+- [x] Hardware/device access
+- [x] Live trading or financial account access
+- [x] Active network testing
+- [x] Threat model ရေးရန် — malicious code, malicious file, prompt injection, secret leakage, tenant/job crossover
+- [x] Security modes သတ်မှတ်ရန် — `trusted`, `restricted`, `hostile-code`
+- [x] MVP အတွက် security claim နှင့် limitation များ ရေးရန်
+- [x] Data classification, retention, deletion policy သတ်မှတ်ရန်
+- [x] Security decision record template ထည့်ရန်
+- [x] MVP acceptance criteria ရေးရန်
 
 ### Exit gate
 
