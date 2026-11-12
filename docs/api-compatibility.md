@@ -9,6 +9,8 @@
 - New required request fields require a new schema version.
 - Unknown request versions fail closed with `invalid_request`.
 - Remote targets are represented in the schema but remain rejected until a remote worker exists.
+- The current local executor honors runtime, code, resource ceilings, and network policy. It rejects non-null `runtime_version`, `entrypoint`, or `workspace`, and non-empty `artifacts`, rather than silently dropping those fields. The `mode` value is currently descriptive metadata; it does not select a separate analyst-orchestration path.
+- Fields that belong to the versioned schema (including `runtime`, `mode`, `workspace`, `artifacts`, and `target`) require `schema_version: "v1"`; legacy-shaped requests containing them are rejected instead of being deserialized with unknown fields ignored.
 - Clients must treat unknown response fields as ignorable and unknown enum values as an unsupported response version.
 - A deprecated field remains readable for at least one minor release after a replacement is available, then is removed only in a new schema version.
 - Error messages are for humans and may change; clients must branch on `ErrorCode`.

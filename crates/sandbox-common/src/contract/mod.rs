@@ -6,6 +6,8 @@ use crate::{ExecutionRequest, ExecutionResult, Language, NetworkPolicy, Resource
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod validation;
+
 /// The first frozen wire-contract version.
 pub const EXECUTION_CONTRACT_V1: &str = "v1";
 
@@ -13,7 +15,7 @@ pub const EXECUTION_CONTRACT_V1: &str = "v1";
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionMode {
-    /// Data analysis with approved input/output artifacts.
+    /// Data analysis intent; the current executor runs the supplied code directly.
     Analyze,
     /// A bounded user or automation script.
     Script,
@@ -165,28 +167,6 @@ pub struct ExecutionRequestV1 {
     pub target: ExecutionTarget,
 }
 
-impl ExecutionRequestV1 {
-    /// Validate the frozen version marker and legacy request invariants.
-    pub fn validate(&self) -> Result<(), crate::SandboxError> {
-        if self.schema_version != EXECUTION_CONTRACT_V1 {
-            return Err(crate::SandboxError::InvalidRequest(
-                "schema_version must be v1".into(),
-            ));
-        }
-        if self.target == ExecutionTarget::Remote {
-            return Err(crate::SandboxError::UnsupportedLanguage(self.runtime));
-        }
-        ExecutionRequest {
-            id: self.id,
-            language: self.runtime,
-            code: self.code.clone(),
-            limits: self.resources.clone(),
-            network: self.network.clone(),
-        }
-        .validate()
-    }
-}
-
 impl From<ExecutionRequest> for ExecutionRequestV1 {
     fn from(request: ExecutionRequest) -> Self {
         Self {
@@ -234,17 +214,14 @@ mod tests {
             schema_version: EXECUTION_CONTRACT_V1.into(),
             id: Uuid::new_v4(),
             runtime: Language::Python,
-            runtime_version: Some("python3".into()),
+            runtime_version: None,
             mode: ExecutionMode::Analyze,
             entrypoint: None,
-            workspace: Some(WorkspaceRef { id: "w-1".into() }),
+            workspace: None,
             code: "print(1)".into(),
             resources: ResourceLimits::default(),
             network: NetworkPolicy::default(),
-            artifacts: vec![ArtifactRequest {
-                path: "report.html".into(),
-                media_type: "text/html".into(),
-            }],
+            artifacts: Vec::new(),
             target: ExecutionTarget::Local,
         };
         let json = serde_json::to_string(&request).unwrap();

@@ -4,7 +4,7 @@ This is the authoritative implementation roadmap for **CortexEnv v0.1 Private An
 
 ## Current repository progress
 
-The repository already contains a Rust workspace, shared execution contracts, WASM and JavaScript adapters, a Python child adapter, cgroup v2 foundations, bounded API admission/history, request IDs, authentication, per-principal quotas, async job ownership, Prometheus metrics, OpenAI-compatible model access, bounded ReAct execution, Docker health checks, and a fail-closed child-hardening foundation for Linux namespaces, `RLIMIT_NOFILE`, `PR_SET_NO_NEW_PRIVS`, and capability clearing.
+The repository already contains a Rust workspace, shared execution contracts with fail-closed rejection of unsupported v1 request metadata, WASM and JavaScript adapters, a Python child adapter, cgroup v2 foundations, bounded API admission/history, request IDs, authentication, per-principal quotas, async job ownership, Prometheus metrics, OpenAI-compatible model access, bounded ReAct execution, Docker health checks, and a fail-closed child-hardening foundation for Linux namespaces, `RLIMIT_NOFILE`, `PR_SET_NO_NEW_PRIVS`, and capability clearing.
 
 The child-hardening foundation is not yet wired into a dedicated runtime supervisor. The pinned seccomp dependency is currently a placeholder, so restricted/production/hostile-code execution must remain fail-closed until a real runtime-specific seccomp-BPF backend, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision are implemented and tested in a disposable Linux environment. The Python adapter's optional `CORTEXENV_CGROUP_ROOT` path uses the prepared admission lifecycle: cgroup/workspace preparation, stopped-child attach, source-release permit, and cgroup-wide cleanup. Python also has a separate, disabled-by-default bubblewrap mode for partial namespace and mount isolation; it is not a production supervisor. WASM/JavaScript isolation, complete filesystem policy, and runtime seccomp remain pending.
 
@@ -75,6 +75,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [x] OpenAPI v1 specification ရေးပြီး freeze လုပ်ရန်
 - [x] Compatibility and deprecation policy ရေးရန်
 - [x] API contract tests ထည့်ရန်
+- [x] Runtime pins, entrypoints, workspace bindings, artifact requests, and remote targets ကို unsupported ဖြစ်လျှင် source execution/queue မလုပ်မီ explicit reject လုပ်ရန်; legacy-shaped requests တွင် v1-only fields ပါလာပါက `schema_version` မရှိဘဲ လက်မခံရန်
 
 ### Exit gate
 

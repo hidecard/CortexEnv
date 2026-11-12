@@ -142,16 +142,27 @@ components:
         schema_version: { type: string, const: v1 }
         id: { type: string, format: uuid }
         runtime: { type: string, enum: [wasm, javascript, python] }
-        runtime_version: { type: [string, 'null'] }
-        mode: { type: string, enum: [analyze, script], default: analyze }
-        entrypoint: { type: [string, 'null'] }
-        workspace: { anyOf: [{ $ref: '#/components/schemas/WorkspaceRef' }, { type: 'null' }] }
+        runtime_version:
+          type: [string, 'null']
+          description: Runtime pinning is reserved; non-null values are rejected by the current local executor.
+        mode:
+          type: string
+          enum: [analyze, script]
+          default: analyze
+          description: Descriptive request mode only; the current executor runs the supplied code directly for either value.
+        entrypoint:
+          type: [string, 'null']
+          description: Custom entrypoints are reserved; non-null values are rejected by the current local executor.
+        workspace:
+          anyOf: [{ $ref: '#/components/schemas/WorkspaceRef' }, { type: 'null' }]
+          description: Workspace binding is reserved; non-null values are rejected until workspace mounts are supported.
         code: { type: string, minLength: 1, maxLength: 16777216 }
         resources: { $ref: '#/components/schemas/ResourceLimits' }
         network: { type: string, enum: [deny, loopback, allowlist] }
         artifacts:
           type: array
           items: { $ref: '#/components/schemas/ArtifactRequest' }
+          description: Non-empty artifact requests are rejected until artifact I/O is implemented.
         target: { type: string, enum: [local, remote], default: local }
     ResourceLimits:
       type: object

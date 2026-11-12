@@ -730,16 +730,34 @@ fn parse_execution_request(payload: Value) -> Result<ExecutionRequest, (StatusCo
             )
         })?;
         request
-            .validate()
-            .map_err(|error| (StatusCode::BAD_REQUEST, format!("invalid request: {error}")))?;
-        Ok(ExecutionRequest {
-            id: request.id,
-            language: request.runtime,
-            code: request.code,
-            limits: request.resources,
-            network: request.network,
-        })
+            .into_execution_request()
+            .map_err(|error| match error {
+                SandboxError::UnsupportedFeature(feature) => (
+                    StatusCode::BAD_REQUEST,
+                    format!("unsupported request feature: {feature}"),
+                ),
+                error => (StatusCode::BAD_REQUEST, format!("invalid request: {error}")),
+            })
     } else {
+        const VERSIONED_ONLY_FIELDS: [&str; 8] = [
+            "runtime",
+            "runtime_version",
+            "mode",
+            "entrypoint",
+            "workspace",
+            "resources",
+            "artifacts",
+            "target",
+        ];
+        if let Some(field) = VERSIONED_ONLY_FIELDS
+            .iter()
+            .find(|field| payload.get(**field).is_some())
+        {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("versioned field `{field}` requires schema_version: v1"),
+            ));
+        }
         let request: ExecutionRequest = serde_json::from_value(payload).map_err(|error| {
             (
                 StatusCode::BAD_REQUEST,
@@ -762,6 +780,10 @@ fn client_safe_error(error: &SandboxError) -> (StatusCode, String) {
         SandboxError::UnsupportedLanguage(language) => (
             StatusCode::BAD_REQUEST,
             format!("unsupported language: {language}"),
+        ),
+        SandboxError::UnsupportedFeature(feature) => (
+            StatusCode::BAD_REQUEST,
+            format!("unsupported request feature: {feature}"),
         ),
         SandboxError::ResourceLimit(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -961,6 +983,97 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn v1_contract_rejects_unimplemented_fields_instead_of_ignoring_them() {
+        let app = router(Arc::new(Runtime::default()));
+        let base = serde_json::json!({
+            "schema_version": "v1",
+            "id": Uuid::new_v4(),
+            "runtime": "python",
+            "mode": "script",
+            "code": "print('must not run')",
+            "resources": sandbox_common::ResourceLimits::default(),
+            "network": "deny",
+            "target": "local"
+        });
+        let unsupported_fields = [
+            ("runtime_version", serde_json::json!("python3.12")),
+            ("entrypoint", serde_json::json!("main.py")),
+            ("workspace", serde_json::json!({ "id": "workspace-1" })),
+            (
+                "artifacts",
+                serde_json::json!([{ "path": "report.html", "media_type": "text/html" }]),
+            ),
+        ];
+
+        for (field, value) in unsupported_fields {
+            let mut body = base.clone();
+            body[field] = value;
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/execute/async")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "field={field}");
+            let message = String::from_utf8(
+                axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
+            )
+            .unwrap();
+            assert!(message.contains("unsupported request feature"), "{message}");
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_contract_rejects_versioned_fields_without_schema_version() {
+        let app = router(Arc::new(Runtime::default()));
+        let base = serde_json::json!({
+            "id": Uuid::new_v4(),
+            "language": "python",
+            "code": "print('must not run')"
+        });
+        let versioned_fields = [
+            ("runtime", serde_json::json!("python")),
+            ("runtime_version", serde_json::json!("python3.12")),
+            ("mode", serde_json::json!("script")),
+            ("entrypoint", serde_json::json!("main.py")),
+            ("workspace", serde_json::json!({ "id": "workspace-1" })),
+            (
+                "resources",
+                serde_json::to_value(sandbox_common::ResourceLimits::default()).unwrap(),
+            ),
+            ("artifacts", serde_json::json!([])),
+            ("target", serde_json::json!("local")),
+        ];
+
+        for (field, value) in versioned_fields {
+            let mut body = base.clone();
+            body[field] = value;
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/execute")
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "field={field}");
+        }
     }
 
     #[tokio::test]

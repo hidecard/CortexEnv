@@ -178,6 +178,9 @@ pub enum SandboxError {
     #[error("unsupported language: {0}")]
     /// The selected runtime is not enabled.
     UnsupportedLanguage(Language),
+    #[error("unsupported feature: {0}")]
+    /// The request uses a feature not implemented by the current executor.
+    UnsupportedFeature(String),
     #[error("resource limit exceeded: {0}")]
     /// A resource ceiling could not be applied or was exceeded.
     ResourceLimit(String),
@@ -201,6 +204,7 @@ impl SandboxError {
         match self {
             Self::InvalidRequest(_) => contract::ErrorCode::InvalidRequest,
             Self::UnsupportedLanguage(_) => contract::ErrorCode::Unsupported,
+            Self::UnsupportedFeature(_) => contract::ErrorCode::Unsupported,
             Self::ResourceLimit(_) => contract::ErrorCode::ResourceLimit,
             Self::Timeout => contract::ErrorCode::TimedOut,
             Self::Runtime(_) => contract::ErrorCode::RuntimeFailure,
