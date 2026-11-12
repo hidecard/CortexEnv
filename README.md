@@ -2,24 +2,26 @@
 
 **CortexEnv** is a Rust workspace for building an observable execution environment for AI-generated and user-submitted code. Requests are validated first, resource policies are explicit, and language runtimes are exposed through focused adapters. Operating-system isolation is still under development; do not use the current runtimes as a hostile-code security boundary.
 
-> **Current status:** WASM, JavaScript, and Python execution adapters are available, along with per-request Wasmtime guest-memory limits, bounded API admission and in-memory job history, request IDs, API-key/JWT authentication, in-memory per-principal request/concurrency quotas, principal-scoped async job results, Prometheus-compatible metrics, a provider-neutral chat-model interface with an OpenAI-compatible client, a bounded ReAct code-execution loop, and the CLI smoke test. JavaScript runs in `deno_core`; Python requires an installed interpreter and runs as a child process with process-group cleanup on supported Linux targets. Setting `CORTEXENV_CGROUP_ROOT` opts Python into delegated cgroup v2 CPU/memory/swap/process limits, with the child attached before its source is released to run. Durable storage, warm workers, stateful sessions, OpenTelemetry export, and the additional language/domain adapters in the master plan remain pending. Linux namespaces, seccomp, capability dropping, filesystem/network isolation, and reliable escaped-descendant cleanup without a supported cgroup `cgroup.kill` remain incomplete; the adapters must not be treated as a complete hostile-code security boundary.
+> **Current status:** WASM, JavaScript, and Python execution adapters are available, along with per-request Wasmtime guest-memory limits, bounded API admission and in-memory job history, request IDs, API-key/JWT authentication, in-memory per-principal request/concurrency quotas, principal-scoped async job results, Prometheus-compatible metrics, a provider-neutral chat-model interface with an OpenAI-compatible client, a bounded ReAct code-execution loop, and the CLI smoke test. JavaScript runs in `deno_core`; Python runs as a child process with process-group cleanup on supported Linux targets. Setting `CORTEXENV_ENABLE_LINUX_SANDBOX=true` opts Python into a partial bubblewrap namespace path; `CORTEXENV_CGROUP_ROOT` separately opts it into delegated cgroup v2 CPU/memory/swap/process limits, attaching the launcher before its source is released. Durable storage, warm workers, stateful sessions, OpenTelemetry export, and the additional language/domain adapters remain pending. Real runtime-specific seccomp, complete supervisor integration, filesystem policy, JavaScript/WASM isolation, and production deployment verification remain incomplete. Do not treat this as a hostile-code security boundary.
 **Recent security progress:** authenticated async jobs are owned by their submitting principal. Status polling, WebSocket streaming, and cross-principal ID collisions do not disclose another principal's job; the static API key intentionally represents one shared principal. These ownership and quota records are in memory only and are lost on restart.
 
 **Product scope and security boundary:** the v0.1 Private Analyst personas, supported/unsupported workloads, top workflows, threat model, security modes, data retention policy, decision-record template, and MVP acceptance criteria are documented in [`docs/product-scope-and-threat-model.md`](docs/product-scope-and-threat-model.md). This document is the product boundary; it does not claim that incomplete isolation controls are production-ready.
 
 **API contract:** the versioned v1 request/result types live in `sandbox-common::contract`; the frozen route description is [`docs/openapi-v1.yaml`](docs/openapi-v1.yaml), and compatibility/deprecation rules are in [`docs/api-compatibility.md`](docs/api-compatibility.md). The legacy Rust request type remains an internal adapter while the HTTP migration is completed.
 
-**Isolation progress:** Linux now has a fail-closed pre-spawn admission coordinator in `sandbox-core`. It validates the request, creates a private per-execution workspace, prepares a cgroup v2 before source may be released to a child, and exposes explicit attach/kill lifecycle operations plus a `ChildLaunchPermit` that cannot be issued before child attachment. This is not yet the complete child supervisor: process spawning, namespace setup, UID/GID mapping, network namespace, and real seccomp profiles remain blocked until their controls are implemented and tested.
+**Isolation progress:** Linux now has a fail-closed pre-spawn admission coordinator in `sandbox-core`. It validates the request, creates a private per-execution workspace, prepares a cgroup v2 before source may be released to a child, and exposes attach/kill lifecycle operations plus a `ChildLaunchPermit` that cannot be issued before child attachment. Python additionally has an opt-in bubblewrap path for user/mount/PID/network/IPC/UTS namespaces, read-only root/system binds, bounded private tmpfs locations, and capability dropping. This remains partial: no runtime-specific seccomp filter is active, the complete child supervisor is not wired across runtimes, and UID/GID/filesystem/deployment guarantees are not certified.
 
 **Recent runtime progress:** WASM deadlines now use a per-execution Wasmtime engine and repeated epoch ticks, preventing a deadline tick during module compilation from leaving an infinite guest loop running and preventing one execution's timeout from interrupting another.
 
 **Recent WASM memory hardening:** Each Wasmtime store now enforces the request's `memory_bytes` limit on linear memory, permits only one instance and one linear memory, and traps when `memory.grow` exceeds the limit. This is a guest-memory bound, not a cap on total process, compiler, or host memory.
 
-**Recent process supervision progress:** On Linux targets with `waitid(WNOWAIT)` support, Python runs in its own process group; timeout and leader exit trigger cleanup before the leader is reaped. If a delegated cgroup root is configured, the Python adapter now uses the prepared admission lifecycle: it reserves the workspace/cgroup, stops the launcher, attaches the child, obtains a source-release permit, and uses the admission cgroup for descendant cleanup. Namespace setup, UID/GID mapping, mount isolation, and runtime seccomp remain child-supervisor work.
+**Recent process supervision progress:** On Linux targets with `waitid(WNOWAIT)` support, Python runs in its own process group; timeout and leader exit trigger cleanup before the leader is reaped. If a delegated cgroup root is configured, the Python adapter uses the prepared admission lifecycle: it reserves workspace/cgroup resources, stops the launcher, attaches it, obtains a source-release permit, and uses the admission cgroup for descendant cleanup. The optional bubblewrap path adds partial namespace/mount controls; complete UID/GID mapping, a full filesystem policy, and runtime seccomp remain supervisor work.
+
+**Recent Python namespace progress:** When explicitly enabled, `CORTEXENV_ENABLE_LINUX_SANDBOX=true` invokes bubblewrap with user, mount, PID, network, IPC, and UTS namespaces, a read-only sandbox root and system binds, private 16 MiB `/tmp` and 64 MiB `/workspace` tmpfs mounts, and dropped child capabilities. A conditional benign integration test checks namespace identity, capability state, mount flags, tmpfs limits, workspace writes, and separation from a host loopback listener. It is Python-only and does not install seccomp or make production-isolation claims.
 
 **Recent Linux resource-control progress:** `ResourceLimits.cpu_quota_millis` defaults to `1000` (one CPU core), accepts 100–64,000 milli-CPUs, and maps to cgroup v2 `cpu.max` with a 100 ms period. `CORTEXENV_CGROUP_ROOT` enables per-execution Python cgroups; missing controller files fail closed before Python source runs. The variable must point to a writable delegated cgroup v2 subtree with the required controllers enabled.
 
-**Next roadmap priorities:** build a fail-closed child supervisor before claiming hostile-code isolation; then add durable/distributed quota accounting, OpenTelemetry export, stateful agent sessions, and end-to-end self-healing coverage. A warm worker pool also remains on the TODO roadmap.
+**Next roadmap priorities:** finish and wire a fail-closed child supervisor, add a real runtime-specific seccomp backend, and validate all controls in the supported disposable deployment environment. Then continue durable/distributed quota accounting, OpenTelemetry export, stateful agent sessions, and end-to-end self-healing coverage. A warm worker pool also remains on the TODO roadmap.
 
 Repository: <https://github.com/hidecard/CortexEnv>
 
@@ -54,9 +56,9 @@ flowchart LR
 
 1. A client creates an `ExecutionRequest` with a UUID, language, source/module payload, resource limits, and network policy.
 2. `sandbox-common` rejects empty or oversized code and validates timeout, CPU quota, memory, process, file-descriptor, and output ceilings.
-3. `sandbox-core` validates and records an explicit isolation plan. OS-level network and filesystem enforcement is not complete; notably, Python `network: deny` is not currently enforced by the host.
+3. `sandbox-core` validates and records an explicit isolation plan. Python `network: deny` is enforced by a network namespace only when `CORTEXENV_ENABLE_LINUX_SANDBOX=true`; otherwise host-level network isolation is not enforced. The namespace mode is partial and does not cover JavaScript/WASM.
 4. `sandbox-runtime` dispatches to the selected runtime. WASM bytes are supplied as hexadecimal text; JavaScript and Python are supplied as source text.
-5. The runtime captures bounded output and returns a structured `ExecutionResult`. Wasmtime enforces guest linear-memory growth against `memory_bytes`; Python CPU, memory, swap, and process ceilings are applied only when `CORTEXENV_CGROUP_ROOT` points to a writable delegated cgroup v2 subtree. Neither mechanism is complete host-process isolation; host network/filesystem isolation and namespaces/seccomp remain incomplete.
+5. The runtime captures bounded output and returns a structured `ExecutionResult`. Wasmtime enforces guest linear-memory growth against `memory_bytes`; Python CPU, memory, swap, and process ceilings are applied only when `CORTEXENV_CGROUP_ROOT` points to a writable delegated cgroup v2 subtree. The opt-in Python namespace root is read-only except for bounded private tmpfs locations; it is not a complete filesystem policy, and total process memory remains uncapped without cgroups. Seccomp and JavaScript/WASM isolation remain incomplete.
 6. The API or CLI serializes the result as JSON for the caller.
 
 ## Workspace layout
@@ -65,7 +67,7 @@ flowchart LR
 | --- | --- |
 | `sandbox-common` | Shared request/result/configuration types, errors, language and network policy enums, and bounded resource validation. |
 | `sandbox-core` | Execution validation, tracing hook, fail-closed isolation plan, cgroup v2 CPU/memory/swap/PID controls, and per-execution temporary workspaces with traversal-safe path resolution. |
-| `sandbox-runtime` | Runtime dispatch for Wasmtime with per-store memory/deadline limits, `deno_core` JavaScript, and Python child execution with Linux process-group supervision and optional cgroup v2 attachment. |
+| `sandbox-runtime` | Runtime dispatch for Wasmtime with per-store memory/deadline limits, `deno_core` JavaScript, and Python child execution with Linux process-group supervision plus optional bubblewrap namespaces and cgroup v2 attachment. |
 | `sandbox-api` | Axum router and server with `GET /health`, synchronous `POST /v1/execute`, asynchronous `POST /v1/execute/async`, and `GET /v1/executions/:id`. |
 | `sandbox-agent` | Provider-neutral `ExecuteCode` and `ChatModel` traits, an OpenAI-compatible chat-completions client, and a bounded ReAct execution loop. |
 | `sandbox-cli` | Local command-line runner, distributed as the `cortexenv` executable. |
@@ -106,7 +108,8 @@ The adapter returns plain assistant text. `ReActAgent` interprets strict JSON `e
 
 - Rust stable and Cargo
 - Python 3 is required only to execute Python requests; select a non-default interpreter with `CORTEXENV_PYTHON`
-- A Linux environment is recommended for the planned namespace/cgroup/seccomp work
+- Bubblewrap is required only for opt-in Linux Python namespace mode; the host/container must allow unprivileged user namespaces
+- A Linux environment is recommended for the remaining child-supervisor/seccomp work
 - No system OpenSSL development package is required for the current HTTP client configuration; `reqwest` uses `rustls-tls`
 
 Install Rust if needed:
@@ -125,7 +128,7 @@ cargo fmt --all -- --check
 cargo test --workspace
 ```
 
-The test suite currently covers shared default policies, bounded resource validation, and the fail-closed network setting in the core isolation plan. The workspace also runs documentation tests for all crates.
+The workspace tests cover API/security modes, request/resource validation, cgroup admission primitives, runtime deadlines/output limits, and agent behavior. On Linux, a conditional benign bubblewrap smoke test checks namespace IDs, zero child capabilities, read-only root/system mounts, bounded private tmpfs, workspace writes, and host-loopback separation; it skips when bubblewrap or rootless namespaces are unavailable. Documentation tests run for all crates.
 
 ## Docker usage
 
@@ -147,6 +150,16 @@ docker compose up --build
 curl http://127.0.0.1:8080/health
 docker compose down
 ```
+
+#### Optional Python namespace mode
+
+The runtime image includes bubblewrap. On a Linux host/container that allows unprivileged user namespaces, enable the Python-only path explicitly:
+
+```bash
+CORTEXENV_ENABLE_LINUX_SANDBOX=true docker compose up --build
+```
+
+Namespace setup failure stops execution; there is no unrestricted fallback. The mode creates user/mount/PID/network/IPC/UTS namespaces, remounts the sandbox root read-only, provides 16 MiB `/tmp` and 64 MiB `/workspace` tmpfs mounts, and drops child capabilities. It does not install seccomp, does not expose the host workspace, and is not certified for hostile multi-tenant workloads. `CORTEXENV_CGROUP_ROOT` is a separate setting for delegated cgroup limits. Do not grant broad capabilities or host mounts to work around a failed namespace preflight.
 
 Run the same health smoke test used by CI after building the image:
 

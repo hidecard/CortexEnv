@@ -2,14 +2,14 @@
 //!
 //! This adapter is a process runner, not a complete security boundary. On Linux
 //! targets with `waitid(WNOWAIT)` support it kills members of the child's
-//! process group when execution ends or times out. Setting
-//! `CORTEXENV_CGROUP_ROOT` additionally opts the Python child into cgroup v2
-//! CPU, memory, swap, and process-count limits before user code starts; the
-//! cgroup's `cgroup.kill` file is used for cleanup when the kernel exposes it.
-//! Without that opt-in, descendants that escape the process group can survive.
-//! Neither mode enforces network or filesystem isolation, and accepting
-//! [`NetworkPolicy::Deny`] does not mean network access is blocked by the
-//! host. Do not use this adapter as protection against hostile code.
+//! process group when execution ends or times out. `CORTEXENV_ENABLE_LINUX_SANDBOX=true`
+//! opts into bubblewrap namespaces, a read-only root, bounded private tmpfs
+//! locations, and capability dropping; setup failure never falls back to an
+//! unrestricted interpreter. `CORTEXENV_CGROUP_ROOT` separately opts into cgroup
+//! v2 resource controls and group cleanup when the kernel supports it. Without
+//! the namespace opt-in, [`NetworkPolicy::Deny`] is not enforced by the host.
+//! Seccomp and complete cross-runtime isolation remain unavailable; do not use
+//! this adapter as protection against hostile code.
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 use nix::{
@@ -40,19 +40,35 @@ use tokio::{
 /// a minimal environment is provided to the child; secrets from the parent
 /// environment are not inherited. On supported Linux targets the interpreter
 /// receives its own process group; remaining group members are killed on
-/// timeout and after the interpreter exits. If `CORTEXENV_CGROUP_ROOT` points
-/// to a writable delegated cgroup v2 subtree, the child is attached before
-/// Python source is released from a stop/exec gate. Targets without the
-/// required Linux wait/signal support do not enable cgroup execution.
+/// timeout and after the interpreter exits. Setting
+/// `CORTEXENV_ENABLE_LINUX_SANDBOX=true` opts into the partial bubblewrap
+/// namespace/mount path. If `CORTEXENV_CGROUP_ROOT` points to a writable
+/// delegated cgroup v2 subtree, the child is attached before Python source is
+/// released from a stop/exec gate. Targets without required Linux wait/signal
+/// support do not enable cgroup execution.
 pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResult, SandboxError> {
     let cgroup_root = std::env::var_os("CORTEXENV_CGROUP_ROOT").map(PathBuf::from);
-    execute_with_cgroup_root(request, cgroup_root.as_deref()).await
+    let use_linux_namespaces = configured_linux_sandbox()?;
+    execute_with_options(request, cgroup_root.as_deref(), use_linux_namespaces).await
 }
 
 async fn execute_with_cgroup_root(
     request: &ExecutionRequest,
     cgroup_root: Option<&Path>,
 ) -> Result<ExecutionResult, SandboxError> {
+    execute_with_options(request, cgroup_root, false).await
+}
+
+async fn execute_with_options(
+    request: &ExecutionRequest,
+    cgroup_root: Option<&Path>,
+    use_linux_namespaces: bool,
+) -> Result<ExecutionResult, SandboxError> {
+    #[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
+    if use_linux_namespaces {
+        return Err(SandboxError::Isolation);
+    }
+
     match &request.network {
         NetworkPolicy::Deny => {}
         _ => {
@@ -92,11 +108,14 @@ async fn execute_with_cgroup_root(
     let workspace_path = admission.workspace_path();
     let execution =
         async move {
-            let mut command = python_command(interpreter, admission.requires_attach());
+            let mut command = python_command(
+                interpreter,
+                admission.requires_attach(),
+                use_linux_namespaces,
+            );
             #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
             command.process_group(0);
             command
-                .args(["-I", "-S", "-"])
                 .current_dir(workspace_path)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -188,6 +207,23 @@ fn python_executable() -> OsString {
     }
 }
 
+fn configured_linux_sandbox() -> Result<bool, SandboxError> {
+    let value = match std::env::var("CORTEXENV_ENABLE_LINUX_SANDBOX") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => return Err(SandboxError::Isolation),
+    };
+    parse_linux_sandbox_setting(value.as_deref())
+}
+
+fn parse_linux_sandbox_setting(value: Option<&str>) -> Result<bool, SandboxError> {
+    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        None | Some("") | Some("0") | Some("false") => Ok(false),
+        Some("1") | Some("true") => Ok(true),
+        _ => Err(SandboxError::Isolation),
+    }
+}
+
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 enum ExecutionAdmission {
     Prepared(PreparedExecution),
@@ -223,21 +259,79 @@ impl ExecutionAdmission {
 }
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
-fn python_command(interpreter: OsString, wait_for_cgroup: bool) -> Command {
-    let command = if wait_for_cgroup {
+fn python_command(
+    interpreter: OsString,
+    wait_for_cgroup: bool,
+    use_linux_namespaces: bool,
+) -> Command {
+    let launch_program = if use_linux_namespaces {
+        resolve_python_for_shell(OsString::from("bwrap"))
+    } else if wait_for_cgroup {
+        resolve_python_for_shell(interpreter.clone())
+    } else {
+        interpreter.clone()
+    };
+    let mut command = if wait_for_cgroup {
         let mut shell = Command::new("/bin/sh");
         shell.args(["-c", "kill -STOP $$; exec \"$@\"", "cortexenv-python"]);
-        shell.arg(resolve_python_for_shell(interpreter));
+        shell.arg(launch_program);
         shell
     } else {
-        Command::new(interpreter)
+        Command::new(launch_program)
     };
+    if use_linux_namespaces {
+        command.args([
+            "--unshare-all",
+            "--die-with-parent",
+            "--cap-drop",
+            "ALL",
+            "--ro-bind",
+            "/usr",
+            "/usr",
+            "--ro-bind-try",
+            "/lib",
+            "/lib",
+            "--ro-bind-try",
+            "/lib64",
+            "/lib64",
+            "--proc",
+            "/proc",
+            "--dev",
+            "/dev",
+            "--dir",
+            "/workspace",
+            "--size",
+            "67108864",
+            "--tmpfs",
+            "/workspace",
+            "--size",
+            "16777216",
+            "--tmpfs",
+            "/tmp",
+            "--remount-ro",
+            "/",
+            "--chdir",
+            "/workspace",
+            "--setenv",
+            "PATH",
+            "/usr/local/bin:/usr/bin:/bin",
+            "--",
+        ]);
+        command.arg(resolve_python_for_shell(interpreter));
+    }
+    command.args(["-I", "-S", "-"]);
     command
 }
 
 #[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
-fn python_command(interpreter: OsString, _wait_for_cgroup: bool) -> Command {
-    Command::new(interpreter)
+fn python_command(
+    interpreter: OsString,
+    _wait_for_cgroup: bool,
+    _use_linux_namespaces: bool,
+) -> Command {
+    let mut command = Command::new(interpreter);
+    command.args(["-I", "-S", "-"]);
+    command
 }
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
@@ -450,10 +544,127 @@ mod tests {
         }
     }
 
+    #[test]
+    fn linux_sandbox_setting_is_explicit_and_rejects_typos() {
+        assert!(!parse_linux_sandbox_setting(None).unwrap());
+        assert!(!parse_linux_sandbox_setting(Some(" false ")).unwrap());
+        assert!(parse_linux_sandbox_setting(Some("true")).unwrap());
+        assert!(parse_linux_sandbox_setting(Some("1")).unwrap());
+        assert!(matches!(
+            parse_linux_sandbox_setting(Some("tru")),
+            Err(SandboxError::Isolation)
+        ));
+    }
+
+    #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+    #[tokio::test]
+    async fn bubblewrap_mode_uses_rootless_linux_namespaces_when_available() {
+        use std::os::unix::fs::MetadataExt;
+
+        let bwrap = resolve_python_for_shell(OsString::from("bwrap"));
+        if !Path::new(&bwrap).is_file() {
+            eprintln!("skipping bubblewrap smoke test: bwrap is not installed");
+            return;
+        }
+        let preflight = std::process::Command::new(&bwrap)
+            .args([
+                "--unshare-all",
+                "--die-with-parent",
+                "--cap-drop",
+                "ALL",
+                "--ro-bind",
+                "/usr",
+                "/usr",
+                "--ro-bind-try",
+                "/lib",
+                "/lib",
+                "--ro-bind-try",
+                "/lib64",
+                "/lib64",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--dir",
+                "/workspace",
+                "--size",
+                "67108864",
+                "--tmpfs",
+                "/workspace",
+                "--size",
+                "16777216",
+                "--tmpfs",
+                "/tmp",
+                "--remount-ro",
+                "/",
+                "--",
+                "/usr/bin/true",
+            ])
+            .output();
+        if !preflight.is_ok_and(|output| output.status.success()) {
+            eprintln!("skipping bubblewrap smoke test: rootless namespaces are unavailable");
+            return;
+        }
+        let host_listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let host_port = host_listener.local_addr().unwrap().port();
+        let namespaces = ["user", "mnt", "pid", "net", "ipc", "uts"];
+        let host_ids = namespaces
+            .iter()
+            .map(|name| {
+                (
+                    *name,
+                    std::fs::metadata(format!("/proc/self/ns/{name}"))
+                        .unwrap()
+                        .ino(),
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        let code = format!(
+            "import os, socket\n{}\ncaps = next(line.split()[1] for line in open('/proc/self/status') if line.startswith('CapEff:'))\nprint('cap_eff=' + caps)\nprint('root_readonly=' + str(bool(os.statvfs('/').f_flag & 1)))\nprint('usr_readonly=' + str(bool(os.statvfs('/usr').f_flag & 1)))\nopen('/workspace/.namespace-smoke', 'w').write('ok')\nos.unlink('/workspace/.namespace-smoke')\nprint('workspace_write=ok')\nprint('workspace_bytes=' + str(os.statvfs('/workspace').f_bsize * os.statvfs('/workspace').f_blocks))\nprint('tmp_bytes=' + str(os.statvfs('/tmp').f_bsize * os.statvfs('/tmp').f_blocks))\ns = socket.socket()\ns.settimeout(0.2)\nresult = s.connect_ex(('127.0.0.1', {host_port}))\ns.close()\nprint('host_loopback_connect=' + str(result))",
+            namespaces
+                .iter()
+                .map(|name| format!(
+                    "print('{}=' + str(os.stat('/proc/self/ns/{}').st_ino))",
+                    name, name
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let mut request = request(&code);
+        request.limits.timeout_ms = 10_000;
+
+        let result = execute_with_options(&request, None, true).await;
+        drop(host_listener);
+        let result = match result {
+            Ok(result) => result,
+            Err(SandboxError::Runtime(message)) if message.contains("No such file") => {
+                eprintln!("skipping bubblewrap smoke test: namespace setup is unavailable");
+                return;
+            }
+            other => other.unwrap(),
+        };
+        assert_eq!(result.exit_code, Some(0), "{result:?}");
+        let details = result
+            .stdout
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .collect::<std::collections::HashMap<_, _>>();
+        for name in namespaces {
+            assert_ne!(details[name].parse::<u64>().unwrap(), host_ids[name]);
+        }
+        assert_eq!(u64::from_str_radix(details["cap_eff"], 16).unwrap(), 0);
+        assert_eq!(details["root_readonly"], "True");
+        assert_eq!(details["usr_readonly"], "True");
+        assert_eq!(details["workspace_write"], "ok");
+        assert!(details["workspace_bytes"].parse::<u64>().unwrap() <= 67_108_864);
+        assert!(details["tmp_bytes"].parse::<u64>().unwrap() <= 16_777_216);
+        assert_ne!(details["host_loopback_connect"], "0");
+    }
+
     #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
     #[tokio::test]
     async fn cgroup_gate_waits_for_parent_continue_before_exec() {
-        let mut command = python_command(python_executable(), true);
+        let mut command = python_command(python_executable(), true, false);
         command
             .process_group(0)
             .stdin(Stdio::null())

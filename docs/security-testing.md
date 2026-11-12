@@ -1,6 +1,6 @@
 # Security Testing Checklist
 
-This checklist records what can be verified against the current implementation and what must remain blocked until an OS-isolated child supervisor exists. Completing this checklist document is not a penetration-test certification and does not make CortexEnv a hostile-code boundary.
+This checklist records what can be verified against the current implementation and what remains unverified until isolation is complete across runtimes and supported deployments. Completing this checklist document is not a penetration-test certification and does not make CortexEnv a hostile-code boundary.
 
 ## Safety rules
 
@@ -8,7 +8,7 @@ This checklist records what can be verified against the current implementation a
 - Do not run destructive payloads, fork bombs, kernel exploits, or unrestricted network probes on the host.
 - Do not grant the API container elevated privileges, the Docker socket, host namespaces, or broad host mounts for these tests.
 - Keep test results, logs, and generated request bodies free of API keys, JWT secrets, and other credentials.
-- Until the child supervisor and OS isolation controls are implemented, use only benign malformed-input and policy-validation tests. Never submit hostile code.
+- Until the full child-supervisor and OS isolation matrix is implemented, use only explicitly benign, non-destructive tests such as policy checks and the conditional namespace smoke test. Never submit hostile code.
 
 ## Automated checks currently available
 
@@ -19,7 +19,7 @@ cargo fmt --all -- --check
 cargo test --workspace
 ```
 
-The current tests cover request validation, backward-compatible decoding and range checks for CPU quotas, cgroup `cpu.max` mapping, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key/JWT protection, request IDs, async duplicate IDs, principal-scoped async job ownership, bounded global and per-principal execution admission/history/rate limiting, sanitized runtime errors, WASM timeout interruption and request-bounded linear-memory growth, JavaScript console capture/error/deadline behavior, and Python stdout/stderr/exit status/deadline/output caps plus unsupported network-policy rejection. Linux tests verify the Python launcher waits for the parent to attach it before `exec`, and missing cgroup controller files fail before user source runs. On Linux targets with `waitid(WNOWAIT)` support, Python timeout/exit cleanup kills descendants in its process group; a configured cgroup additionally uses `cgroup.kill` when available. Without a configured cgroup or supported `cgroup.kill`, escaped descendants and host network/filesystem isolation are not contained.
+The current tests cover request validation, backward-compatible decoding and range checks for CPU quotas, cgroup `cpu.max` mapping, denied-by-default policy planning, traversal rejection in the temporary-workspace path resolver, API-key/JWT protection, request IDs, async duplicate IDs, principal-scoped async job ownership, bounded global and per-principal execution admission/history/rate limiting, sanitized runtime errors, WASM timeout interruption and request-bounded linear-memory growth, JavaScript console capture/error/deadline behavior, and Python stdout/stderr/exit status/deadline/output caps plus unsupported network-policy rejection. Linux tests verify the Python launcher waits for the parent to attach it before `exec`, and missing cgroup controller files fail before user source runs. On Linux targets with `waitid(WNOWAIT)` support, Python timeout/exit cleanup kills descendants in its process group; a configured cgroup additionally uses `cgroup.kill` when available. A conditional benign bubblewrap smoke test checks all six namespace identities, zero child capabilities, read-only root and `/usr`, 64 MiB workspace and 16 MiB `/tmp` bounds, workspace writes, and inability to connect to a host loopback listener; it skips when bubblewrap or rootless namespaces are unavailable. Without the namespace opt-in, or without a configured cgroup/supported `cgroup.kill`, escaped descendants and host network/filesystem isolation are not contained.
 
 The `sandbox-core::security` tests cover parsing `trusted`, `restricted`/`production`, and `hostile-code` modes and verify that only trusted development mode permits the current in-process adapters. A deployment smoke check should set `CORTEXENV_SECURITY_MODE=restricted` and confirm execution is rejected before runtime startup.
 
@@ -69,16 +69,17 @@ Use a disposable local instance and non-secret test credentials. Verify:
 - [ ] With `CORTEXENV_MAX_STORED_EXECUTIONS=1`, complete multiple benign async jobs and verify the oldest completed result is evicted while a running job remains addressable.
 - [ ] When a result is evicted, both the status endpoint and WebSocket stream report it as not found; document this retention behavior for clients.
 
-## Linux isolation checks — blocked pending child supervisor
+## Linux isolation checks — partial implementation; release gate remains blocked
 
-The following are **not yet safe or meaningful to claim as implemented**. Leave them unchecked until execution is moved into a dedicated child process and the corresponding controls are wired before untrusted code runs:
+The smoke test below covers only the opt-in Python bubblewrap path on hosts that pass its namespace preflight. It is benign, is not an escape test, and does not certify the deployment image or other runtimes. Keep the hostile-code prohibition above until the full supervisor matrix and release gate pass.
 
-- [ ] Verify PID, mount, user, network, UTS, and IPC namespaces from inside the child.
+- [x] Conditional smoke test verifies Python runs in distinct user, mount, PID, network, UTS, and IPC namespaces when bubblewrap and rootless user namespaces are available.
+- [ ] Verify namespace setup and fail-closed behavior in every supported container/deployment environment; JavaScript and WASM still run in-process.
 - [ ] Verify unprivileged UID/GID mapping and rootless operation.
-- [ ] Verify a minimal read-only root filesystem, writable per-job workspace, symlink/path traversal protection, and cleanup after success, timeout, and crash.
+- [ ] Verify the complete minimal root filesystem, writable per-job workspace, symlink/path traversal protection, and cleanup after success, timeout, and crash.
 - [ ] Verify cgroup v2 memory, swap, PID, CPU, and file-descriptor limits against the child process, including cleanup after forced termination.
-- [ ] Verify `PR_SET_NO_NEW_PRIVS`, capability dropping, and per-runtime seccomp profiles with allow/deny syscall tests.
-- [ ] Verify default-deny network behavior and any explicitly supported loopback/allowlist policy from inside the child, including DNS and IPv4/IPv6 cases.
+- [ ] Verify `PR_SET_NO_NEW_PRIVS` and per-runtime seccomp profiles with allow/deny syscall tests (the current Python bubblewrap path drops capabilities but does not install seccomp).
+- [ ] Verify default-deny network behavior and any explicitly supported loopback/allowlist policy across runtimes, including DNS and IPv4/IPv6 cases; only a local-loopback separation smoke check currently exists for Python.
 - [ ] Verify parent-enforced wall-clock timeout, hard child termination, bounded stdout/stderr capture, and output backpressure.
 - [ ] Attempt namespace, filesystem, process, and network escape tests only in a disposable VM designed for hostile-code testing; record kernel, container runtime, and configuration versions.
 

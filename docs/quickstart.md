@@ -6,7 +6,7 @@ This guide walks through a safe local development flow for CortexEnv v0.1. It is
 
 ## 1. Get the source and check prerequisites
 
-Linux is the recommended development environment. Rust stable and Cargo are required. Python 3 is required only when executing Python requests. Docker is optional for the container flow.
+Linux is the recommended development environment. Rust stable and Cargo are required. Python 3 is required only when executing Python requests. Bubblewrap and a host/container that permits unprivileged user namespaces are required only for the optional Python namespace mode. Docker is optional for the container flow.
 
 ```bash
 git clone https://github.com/hidecard/CortexEnv.git
@@ -29,7 +29,7 @@ For local development with trusted code, set:
 export CORTEXENV_SECURITY_MODE=trusted
 ```
 
-This is the compatibility/development mode. It does not provide namespaces, mount isolation, host network isolation, or a complete seccomp boundary.
+This is the compatibility/development mode. It does not provide the complete child supervisor or seccomp boundary. Python can separately opt into partial bubblewrap namespaces with `CORTEXENV_ENABLE_LINUX_SANDBOX=true`; this does not enable isolation for WASM or JavaScript and is not a hostile-code boundary.
 
 For a production-oriented configuration, use:
 
@@ -129,7 +129,16 @@ curl -sS http://127.0.0.1:8080/v1/execute \
   -d '{"language":"python","code":"print(\u0027hello from Python\u0027)","network":"deny"}'
 ```
 
-The `id` field is generated when omitted. `network: deny` is the accepted policy for the current Python and JavaScript adapters, but host-level network isolation is not yet enforced.
+The `id` field is generated when omitted. `network: deny` is the accepted policy for the current Python and JavaScript adapters. Host-level network isolation is enforced for Python only when the opt-in bubblewrap network namespace is enabled; otherwise it is not enforced. JavaScript network isolation remains incomplete.
+
+For a local Linux development run with the partial Python namespace mode, install bubblewrap through the operating system package manager and set the environment variable before starting the API:
+
+```bash
+export CORTEXENV_ENABLE_LINUX_SANDBOX=true
+cargo run -p sandbox-api --bin cortexenv-server
+```
+
+The mode uses user/mount/PID/network/IPC/UTS namespaces, read-only root/system mounts, 16 MiB `/tmp` and 64 MiB `/workspace` tmpfs mounts, and dropped child capabilities. If bubblewrap is absent or the host/container refuses namespace setup, Python execution fails rather than falling back. The namespace `/workspace` is ephemeral; current API requests do not yet provide host-mounted input/output artifacts.
 
 ## 7. Submit and follow an asynchronous job
 
@@ -193,6 +202,8 @@ cargo run -p sandbox-api --bin cortexenv-server
 
 The subtree must expose the required controller files and allow creation of per-execution cgroups. Missing or unwritable controller files fail closed before Python source is released. This optional path applies resource controls and process cleanup; it is not a substitute for namespaces, mount isolation, or seccomp.
 
+The cgroup and bubblewrap settings are independent. If both are enabled, the launcher is attached to the cgroup before bubblewrap starts; cgroup cleanup can also reach descendants that leave their process group when `cgroup.kill` is available.
+
 Check the environment without submitting user code:
 
 ```bash
@@ -228,6 +239,8 @@ bash scripts/docker-smoke-test.sh
 ```
 
 The image runs as a non-root user with dropped capabilities and `no-new-privileges`, but the application-level hostile-code boundary remains incomplete.
+
+For the partial Python-only bubblewrap path, run Compose with `CORTEXENV_ENABLE_LINUX_SANDBOX=true`. The host/container must allow unprivileged user namespaces; setup failure stops Python execution. The mode does not enable seccomp and is not production isolation.
 
 ## 12. Stop, clean up, and troubleshoot
 

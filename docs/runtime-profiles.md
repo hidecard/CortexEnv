@@ -10,7 +10,7 @@
 | `javascript` | `deno_core` | UTF-8 source text | No | Yes, deadline/interrupt behavior | No complete OS memory limit | `deny` | No |
 | `python` | `python3` | UTF-8 source text | Yes | Yes, supervised child deadline | Yes when optional cgroup v2 is configured | `deny` | No |
 
-Python uses `-I -S -`, clears the child environment, runs in a private temporary workspace, and uses a process group. When `CORTEXENV_CGROUP_ROOT` points to a writable delegated cgroup v2 subtree, it also uses the prepared admission lifecycle: workspace/cgroup creation, stopped-child attach, source-release permit, and cgroup cleanup.
+Python uses `-I -S -`, clears the child environment, and uses a process group. Setting `CORTEXENV_ENABLE_LINUX_SANDBOX=true` opts into bubblewrap user/mount/PID/network/IPC/UTS namespaces, a read-only root/system view, bounded private tmpfs at `/tmp` and `/workspace`, and capability dropping; setup failure has no unrestricted fallback. The namespace `/workspace` is ephemeral and does not mount host input/output artifacts. When `CORTEXENV_CGROUP_ROOT` points to a writable delegated cgroup v2 subtree, it separately uses the prepared admission lifecycle: workspace/cgroup creation, stopped-launcher attach, source-release permit, and cgroup cleanup.
 
 ## Rust discovery API
 
@@ -24,7 +24,7 @@ assert!(python.child_process);
 assert_eq!(python.network, "deny");
 ```
 
-The profile fields intentionally expose limitations such as `hostile_code_boundary: false`. Callers must not infer that `network: deny` blocks host networking; namespace, filesystem, capability, and runtime-specific seccomp enforcement remain incomplete until the dedicated child supervisor is finished.
+The profile fields intentionally expose limitations such as `hostile_code_boundary: false`. Callers must not infer that `network: deny` blocks host networking unless the optional Python bubblewrap network namespace is enabled. The mode is partial: runtime-specific seccomp, full filesystem policy, deployment-matrix verification, and JavaScript/WASM isolation remain incomplete until the dedicated child supervisor is finished.
 
 ## Security-mode interaction
 

@@ -78,7 +78,7 @@ Authentication, authorization, and audit controls must distinguish these respons
 
 ### Known residual risks before the Phase 2 exit gate
 
-The current adapters are not a complete hostile-code boundary. Linux namespaces, UID/GID mapping, mount isolation, runtime-specific seccomp-BPF profiles, reliable cgroup attachment for every runtime, network namespace enforcement, and parent-side child supervision are still incomplete. The service therefore remains suitable only for trusted internal development/private pilot use until those controls and adversarial evidence are complete.
+The current adapters are not a complete hostile-code boundary. Python has an optional bubblewrap path for namespaces, read-only root/system mounts, bounded private tmpfs, and capability dropping, but it is not enabled by default, does not expose approved host input/output mounts, and does not install seccomp. UID/GID mapping evidence, runtime-specific seccomp-BPF profiles, reliable cgroup attachment for every runtime, complete network/filesystem policy, JavaScript/WASM supervision, and parent-side lifecycle guarantees remain incomplete. The service therefore remains suitable only for trusted internal development/private pilot use until the required controls and adversarial evidence are complete.
 
 ## 6. Security modes
 
