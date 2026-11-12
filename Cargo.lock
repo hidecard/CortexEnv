@@ -3486,6 +3486,7 @@ dependencies = [
  "cgroups-rs",
  "chrono",
  "dashmap",
+ "libc",
  "nix 0.29.0",
  "sandbox-common",
  "seccompiler",
@@ -3536,9 +3537,12 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seccompiler"
-version = "0.1.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "234ddf71845ee6e39e3058ea2677e058ca45ad9e1cf4c2a77e38c6ae06c7f1b7"
+checksum = "a4ae55de56877481d112a559bbc12667635fdaf5e005712fd4e2b2fa50ffc884"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "security-framework"

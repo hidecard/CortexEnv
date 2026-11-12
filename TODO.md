@@ -6,7 +6,7 @@ This is the authoritative implementation roadmap for **CortexEnv v0.1 Private An
 
 The repository already contains a Rust workspace, shared execution contracts with fail-closed rejection of unsupported v1 request metadata, WASM and JavaScript adapters, a Python child adapter, cgroup v2 foundations, bounded API admission/history, request IDs, authentication, per-principal quotas, async job ownership, Prometheus metrics, OpenAI-compatible model access, bounded ReAct execution, Docker health checks, and a fail-closed child-hardening foundation for Linux namespaces, `RLIMIT_NOFILE`, `PR_SET_NO_NEW_PRIVS`, and capability clearing.
 
-The child-hardening foundation is not yet wired into a dedicated runtime supervisor. The pinned seccomp dependency is currently a placeholder, so restricted/production/hostile-code execution must remain fail-closed until a real runtime-specific seccomp-BPF backend, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision are implemented and tested in a disposable Linux environment. The Python adapter's optional `CORTEXENV_CGROUP_ROOT` path uses the prepared admission lifecycle: cgroup/workspace preparation, stopped-child attach, source-release permit, and cgroup-wide cleanup. Python also has a separate, disabled-by-default bubblewrap mode for partial namespace and mount isolation; it is not a production supervisor. WASM/JavaScript isolation, complete filesystem policy, and runtime seccomp remain pending.
+The child-hardening foundation is not yet wired into a dedicated runtime supervisor. The placeholder dependency has been replaced with upstream `seccompiler` 0.5, and the child-only API can compile/install a baseline WASM denylist filter. It defaults to allowing other syscalls, is not a complete sandbox, and is not applied by current runtime launch paths. Restricted/production/hostile-code execution therefore remains fail-closed until runtime-specific profiles, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision are implemented and tested in a disposable Linux environment. The Python adapter's optional `CORTEXENV_CGROUP_ROOT` path uses the prepared admission lifecycle: cgroup/workspace preparation, stopped-child attach, source-release permit, and cgroup-wide cleanup. Python also has a separate, disabled-by-default bubblewrap mode for partial namespace and mount isolation; it is not a production supervisor. WASM/JavaScript isolation, complete filesystem policy, and runtime-profile integration remain pending.
 
 The runtime now exposes `CORTEXENV_SECURITY_MODE`: `trusted` is development-only, while `restricted`/`production`/`hostile-code` fail closed during runtime startup and before any current adapter starts. This prevents an operator from accidentally treating the in-process adapters as a production sandbox, but it does not replace the dedicated child supervisor. Linux also has a fail-closed pre-spawn admission coordinator that validates the request, reserves a private workspace, and prepares the cgroup before source release.
 
@@ -106,6 +106,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [ ] `PR_SET_NO_NEW_PRIVS` သတ်မှတ်ရန်
 - [ ] Linux capabilities drop လုပ်ရန်
 - [ ] Runtime-specific seccomp profile ထည့်ရန်
+- [x] Placeholder `seccompiler` dependency ကို real BPF compiler ဖြင့်အစားထိုးပြီး child-only WASM denylist filter ကို kernel က apply လုပ်ကြောင်း စမ်းသပ်ရန် (complete allowlist/profile မဟုတ်ပါ၊ runtime launch path တွင် မချိတ်ရသေးပါ)
 - [ ] Default-deny network policy enforce လုပ်ရန်
 - [ ] Filesystem access ကို explicit workspace/input/output mount များထဲတွင် ကန့်သတ်ရန်
 - [ ] Process-tree cancellation နှင့် descendant cleanup ထည့်ရန်
@@ -166,7 +167,8 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [ ] Disk/temp-file quota test ထည့်ရန်
 - [ ] Stdout/stderr flood test ထည့်ရန်
 - [ ] Compile/startup/execution/shutdown timeout test ထည့်ရန်
-- [ ] Seccomp deny test ထည့်ရန်
+- [x] Child-only seccomp-BPF primitive test ထည့်ရန် — filter တပ်ထားသော thread တွင် `getpid` ကို deny လုပ်ကြောင်း စစ်ဆေးရန်
+- [ ] Runtime-specific seccomp deny test ကို dedicated supervisor နှင့် disposable Linux deployment တွင် စမ်းရန်
 - [ ] Capability and privilege-escalation test ထည့်ရန်
 - [ ] Child crash/kill နောက် API process survival test ထည့်ရန်
 - [ ] Concurrent execution isolation test ထည့်ရန်

@@ -4,6 +4,7 @@
 //! dedicated child has been created and before the child reads or executes user
 //! source. They never run from an HTTP handler or mutate the API process.
 
+use super::{seccomp::apply_seccomp_profile, SeccompProfile};
 use capctl::{caps::CapState, prctl};
 use nix::{
     sched::{unshare, CloneFlags},
@@ -18,6 +19,8 @@ pub struct ChildIsolationConfig {
     pub namespaces: bool,
     /// Require a usable seccomp backend before allowing execution.
     pub require_seccomp: bool,
+    /// Runtime-specific seccomp profile to install in the child.
+    pub seccomp_profile: SeccompProfile,
     /// Drop effective, permitted, inheritable, ambient, and bounding capabilities.
     pub drop_capabilities: bool,
 }
@@ -27,23 +30,18 @@ impl Default for ChildIsolationConfig {
         Self {
             namespaces: true,
             require_seccomp: true,
+            seccomp_profile: SeccompProfile::Wasm,
             drop_capabilities: true,
         }
     }
 }
 
-/// Apply child-side namespace, rlimit, no-new-privileges, and capability controls.
+/// Apply child-side namespace, rlimit, no-new-privileges, capability, and seccomp controls.
 ///
-/// The function is deliberately fail-closed: the repository's pinned
-/// `seccompiler` dependency is currently a placeholder crate and cannot install
-/// a real BPF filter. When `require_seccomp` is true, this function returns
-/// [`SandboxError::Isolation`] without launching a runtime. This makes the
-/// missing filter an explicit deployment failure rather than a false claim that
-/// seccomp is active.
-///
-/// A future supervisor must call this from a dedicated child before it starts a
-/// language runtime, then replace the backend check with a real per-runtime
-/// filter and only continue after that filter has been installed successfully.
+/// This function must run in a dedicated, single-threaded child before the
+/// runtime or user source is loaded. It installs the selected BPF filter only
+/// on the calling thread; new child threads inherit it. Any missing control or
+/// installation failure is returned as [`SandboxError::Isolation`].
 #[cfg(target_os = "linux")]
 pub fn apply_child_isolation(
     limits: &ResourceLimits,
@@ -81,10 +79,7 @@ pub fn apply_child_isolation(
     }
 
     if config.require_seccomp {
-        // Do not use PR_SET_SECCOMP strict mode here: it would kill normal
-        // runtimes because it permits only read/write/exit/sigreturn. The
-        // pinned seccompiler crate has no filter API, so fail closed instead.
-        return Err(SandboxError::Isolation);
+        apply_seccomp_profile(config.seccomp_profile)?;
     }
 
     Ok(())
@@ -99,6 +94,7 @@ mod tests {
         let config = ChildIsolationConfig::default();
         assert!(config.namespaces);
         assert!(config.require_seccomp);
+        assert_eq!(config.seccomp_profile, SeccompProfile::Wasm);
         assert!(config.drop_capabilities);
     }
 

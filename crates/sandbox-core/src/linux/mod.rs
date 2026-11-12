@@ -6,8 +6,10 @@
 #![cfg(target_os = "linux")]
 
 mod cgroup;
+mod seccomp;
 mod supervisor;
 pub use cgroup::{detect_cgroup_v2, CgroupLimits, CgroupV2};
+pub use seccomp::SeccompProfile;
 pub use supervisor::{apply_child_isolation, ChildIsolationConfig};
 
 use crate::ExecutionWorkspace;
@@ -26,13 +28,6 @@ pub struct LinuxIsolationPlan {
     pub cgroup: CgroupLimits,
     /// Seccomp profile name selected for the runtime.
     pub seccomp_profile: SeccompProfile,
-}
-
-/// Runtime-specific seccomp profile selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SeccompProfile {
-    /// Minimal profile for a WASM child supervisor.
-    Wasm,
 }
 
 /// Configuration used before a child process is launched.

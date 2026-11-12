@@ -27,9 +27,9 @@ On Linux, `sandbox-core::linux` provides a fail-closed cgroup v2 controller mana
 
 ## Child-hardening foundation
 
-`sandbox-core::linux::apply_child_isolation` is now the child-only hardening entry point. It validates the request, requests the user/mount/PID/network/UTS/IPC namespaces, applies `RLIMIT_NOFILE`, sets `PR_SET_NO_NEW_PRIVS`, and clears effective, permitted, inheritable, ambient, and bounding capabilities. It is not called from the API process and it does not launch a runtime.
+`sandbox-core::linux::apply_child_isolation` is the child-only hardening entry point. It validates resource limits, requests the user/mount/PID/network/UTS/IPC namespaces, applies `RLIMIT_NOFILE`, sets `PR_SET_NO_NEW_PRIVS`, clears effective, permitted, inheritable, ambient, and bounding capabilities, then installs the configured seccomp profile when required. It is not called from the API process and it does not launch a runtime.
 
-The function currently fails closed when seccomp is required because the pinned `seccompiler` 0.1.0 dependency in this repository is a placeholder without a BPF filter API. This is intentional: the code must not claim seccomp protection or run user code without a real filter. The next implementation step is to replace that dependency/backend and wire this entry point into a dedicated child supervisor with UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision.
+The placeholder dependency has been replaced with upstream `seccompiler` 0.5. The current WASM baseline filter denies selected high-risk syscalls with `EPERM` and allows other syscalls by default; it is a denylist, not a complete least-privilege profile. Installation applies to the calling thread, so the entry point must run in a dedicated single-threaded child before runtime startup. No runtime launch path invokes it yet. Python and JavaScript profiles, dedicated supervisor wiring, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision remain required before production use.
 
 ## Production safety gate
 
@@ -46,4 +46,4 @@ The function currently fails closed when seccomp is required because the pinned 
 7. Attach the child PID to `cgroup.procs` before starting the runtime.
 8. Supervise output, deadline, exit status, and cleanup from the parent.
 
-The optional Python bubblewrap path implements part of the namespace/mount sequence only; it is not enabled by default and is not a general supervisor. Seccomp, the complete filesystem policy, deployment-environment verification, and child supervisors for WASM/JavaScript remain pending in `TODO.md`. Until those controls are validated together, do not treat CortexEnv as a hostile-code security boundary.
+The optional Python bubblewrap path implements part of the namespace/mount sequence only; it is not enabled by default and is not a general supervisor. Runtime-specific seccomp profiles, the complete filesystem policy, deployment-environment verification, and child supervisors for WASM/JavaScript remain pending in `TODO.md`. Until those controls are validated together, do not treat CortexEnv as a hostile-code security boundary.

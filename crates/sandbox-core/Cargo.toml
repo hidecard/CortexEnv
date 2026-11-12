@@ -18,7 +18,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.29", features = ["process", "mount", "user", "resource", "fs", "time", "sched"] }
 cgroups-rs = "0.5.1"
-seccompiler = "0.1"
+seccompiler.workspace = true
+libc.workspace = true
 capctl = "0.2"
 
 [dev-dependencies]
