@@ -96,7 +96,7 @@ async fn execute_with_options(
     let admission = if cgroup_root.is_some() {
         return Err(SandboxError::Isolation);
     } else {
-        ExecutionWorkspace::new()?
+        ExecutionAdmission::Workspace(ExecutionWorkspace::new()?)
     };
     let workspace_path = admission.workspace_path();
     let execution =
@@ -238,12 +238,16 @@ impl ExecutionAdmission {
 }
 
 #[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
-type ExecutionAdmission = ExecutionWorkspace;
+enum ExecutionAdmission {
+    Workspace(ExecutionWorkspace),
+}
 
 #[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
 impl ExecutionAdmission {
     fn workspace_path(&self) -> PathBuf {
-        self.root().to_path_buf()
+        match self {
+            Self::Workspace(workspace) => workspace.root().to_path_buf(),
+        }
     }
 
     fn requires_attach(&self) -> bool {
