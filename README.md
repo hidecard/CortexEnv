@@ -9,7 +9,7 @@
 
 **API contract:** the versioned v1 request/result types live in `sandbox-common::contract`; the frozen route description is [`docs/openapi-v1.yaml`](docs/openapi-v1.yaml), and compatibility/deprecation rules are in [`docs/api-compatibility.md`](docs/api-compatibility.md). The legacy Rust request type remains an internal adapter while the HTTP migration is completed.
 
-**Isolation progress:** Linux now has a fail-closed pre-spawn admission coordinator in `sandbox-core`. It validates the request, creates a private per-execution workspace, prepares a cgroup v2 before source may be released to a child, and exposes explicit attach/kill lifecycle operations for the future parent supervisor. This is not yet the complete child supervisor: process spawning, namespace setup, UID/GID mapping, network namespace, and real seccomp profiles remain blocked until their controls are implemented and tested.
+**Isolation progress:** Linux now has a fail-closed pre-spawn admission coordinator in `sandbox-core`. It validates the request, creates a private per-execution workspace, prepares a cgroup v2 before source may be released to a child, and exposes explicit attach/kill lifecycle operations plus a `ChildLaunchPermit` that cannot be issued before child attachment. This is not yet the complete child supervisor: process spawning, namespace setup, UID/GID mapping, network namespace, and real seccomp profiles remain blocked until their controls are implemented and tested.
 
 **Recent runtime progress:** WASM deadlines now use a per-execution Wasmtime engine and repeated epoch ticks, preventing a deadline tick during module compilation from leaving an infinite guest loop running and preventing one execution's timeout from interrupting another.
 

@@ -63,6 +63,7 @@ pub struct PreparedExecution {
     request_id: Uuid,
     workspace: ExecutionWorkspace,
     cgroup: Option<CgroupV2>,
+    child_pid: Option<u32>,
 }
 
 impl std::fmt::Debug for PreparedExecution {
@@ -71,6 +72,7 @@ impl std::fmt::Debug for PreparedExecution {
             .field("request_id", &self.request_id)
             .field("workspace", &self.workspace.root())
             .field("cgroup", &self.cgroup.as_ref().map(CgroupV2::path))
+            .field("child_pid", &self.child_pid)
             .finish()
     }
 }
@@ -96,11 +98,29 @@ impl PreparedExecution {
     /// A prepared execution without a cgroup cannot be used as a restricted
     /// child-supervisor admission, so it fails closed instead of silently
     /// running outside resource controls.
-    pub fn attach_child(&self, pid: u32) -> Result<(), SandboxError> {
+    pub fn attach_child(&mut self, pid: u32) -> Result<(), SandboxError> {
+        if pid == 0 {
+            return Err(SandboxError::Isolation);
+        }
         self.cgroup
             .as_ref()
             .ok_or(SandboxError::Isolation)?
-            .attach_pid(pid)
+            .attach_pid(pid)?;
+        self.child_pid = Some(pid);
+        Ok(())
+    }
+
+    /// Return a permit that authorizes releasing source to the attached child.
+    ///
+    /// The future supervisor must obtain this permit only after cgroup
+    /// attachment and before writing source or starting the runtime.
+    pub fn release_source(&self) -> Result<ChildLaunchPermit, SandboxError> {
+        let child_pid = self.child_pid.ok_or(SandboxError::Isolation)?;
+        Ok(ChildLaunchPermit {
+            request_id: self.request_id,
+            child_pid,
+            workspace: self.workspace.root().to_path_buf(),
+        })
     }
 
     /// Kill the complete execution cgroup during cancellation or cleanup.
@@ -140,7 +160,33 @@ impl ChildSupervisor {
             request_id: request.id,
             workspace,
             cgroup,
+            child_pid: None,
         })
+    }
+}
+
+/// Capability proving that a prepared child passed the attach gate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildLaunchPermit {
+    request_id: Uuid,
+    child_pid: u32,
+    workspace: PathBuf,
+}
+
+impl ChildLaunchPermit {
+    /// Request associated with the permit.
+    pub fn request_id(&self) -> Uuid {
+        self.request_id
+    }
+
+    /// Attached child PID authorized to receive source.
+    pub fn child_pid(&self) -> u32 {
+        self.child_pid
+    }
+
+    /// Workspace reserved for the authorized child.
+    pub fn workspace(&self) -> &Path {
+        &self.workspace
     }
 }
 
@@ -209,7 +255,7 @@ mod tests {
             limits: ResourceLimits::default(),
             network: sandbox_common::NetworkPolicy::Deny,
         };
-        let prepared = ChildSupervisor
+        let mut prepared = ChildSupervisor
             .prepare(
                 &request,
                 &ChildSupervisorConfig {
@@ -231,5 +277,40 @@ mod tests {
             std::fs::read_to_string(cgroup.join("cgroup.kill")).unwrap(),
             "1"
         );
+    }
+
+    #[test]
+    fn source_release_requires_a_valid_attached_child() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("cgroup.controllers"), "cpu memory pids").unwrap();
+        let request = ExecutionRequest {
+            id: Uuid::new_v4(),
+            language: sandbox_common::Language::Wasm,
+            code: "0061736d01000000".into(),
+            limits: ResourceLimits::default(),
+            network: sandbox_common::NetworkPolicy::Deny,
+        };
+        let mut prepared = ChildSupervisor
+            .prepare(
+                &request,
+                &ChildSupervisorConfig {
+                    cgroup_root: Some(root.path().to_path_buf()),
+                    require_cgroup: true,
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            prepared.release_source(),
+            Err(SandboxError::Isolation)
+        ));
+        let cgroup = prepared.cgroup_path().unwrap().to_path_buf();
+        std::fs::write(cgroup.join("cgroup.procs"), "").unwrap();
+        std::fs::write(cgroup.join("cgroup.kill"), "").unwrap();
+        assert!(prepared.attach_child(0).is_err());
+        prepared.attach_child(4243).unwrap();
+        let permit = prepared.release_source().unwrap();
+        assert_eq!(permit.request_id(), request.id);
+        assert_eq!(permit.child_pid(), 4243);
+        assert_eq!(permit.workspace(), prepared.workspace().root());
     }
 }
