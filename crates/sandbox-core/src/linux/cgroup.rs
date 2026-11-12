@@ -61,6 +61,10 @@ impl CgroupV2 {
         }
         let path = root.join(format!("cortexenv-{id}"));
         fs::create_dir(&path).map_err(|_| SandboxError::Isolation)?;
+        #[cfg(test)]
+        for file in ["memory.max", "memory.swap.max", "pids.max", "cpu.max"] {
+            fs::write(path.join(file), "").map_err(|_| SandboxError::Isolation)?;
+        }
         let result = apply_limits(&path, &CgroupLimits::from_resource_limits(limits))
             .map(|()| Self { path: path.clone() });
         if result.is_err() {

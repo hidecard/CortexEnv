@@ -90,6 +90,26 @@ impl PreparedExecution {
     pub fn cgroup_path(&self) -> Option<&Path> {
         self.cgroup.as_ref().map(CgroupV2::path)
     }
+
+    /// Attach the supervisor child to the prepared cgroup before releasing source.
+    ///
+    /// A prepared execution without a cgroup cannot be used as a restricted
+    /// child-supervisor admission, so it fails closed instead of silently
+    /// running outside resource controls.
+    pub fn attach_child(&self, pid: u32) -> Result<(), SandboxError> {
+        self.cgroup
+            .as_ref()
+            .ok_or(SandboxError::Isolation)?
+            .attach_pid(pid)
+    }
+
+    /// Kill the complete execution cgroup during cancellation or cleanup.
+    pub fn kill_children(&self) -> Result<(), SandboxError> {
+        self.cgroup
+            .as_ref()
+            .ok_or(SandboxError::Isolation)?
+            .kill_all()
+    }
 }
 
 /// Pre-spawn child admission coordinator.
@@ -176,5 +196,40 @@ mod tests {
             ChildSupervisor.prepare(&request, &config),
             Err(SandboxError::Isolation)
         ));
+    }
+
+    #[test]
+    fn prepared_execution_attaches_and_kills_the_child_cgroup() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("cgroup.controllers"), "cpu memory pids").unwrap();
+        let request = ExecutionRequest {
+            id: Uuid::new_v4(),
+            language: sandbox_common::Language::Wasm,
+            code: "0061736d01000000".into(),
+            limits: ResourceLimits::default(),
+            network: sandbox_common::NetworkPolicy::Deny,
+        };
+        let prepared = ChildSupervisor
+            .prepare(
+                &request,
+                &ChildSupervisorConfig {
+                    cgroup_root: Some(root.path().to_path_buf()),
+                    require_cgroup: true,
+                },
+            )
+            .unwrap();
+        let cgroup = prepared.cgroup_path().unwrap().to_path_buf();
+        std::fs::write(cgroup.join("cgroup.procs"), "").unwrap();
+        std::fs::write(cgroup.join("cgroup.kill"), "").unwrap();
+        prepared.attach_child(4242).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(cgroup.join("cgroup.procs")).unwrap(),
+            "4242"
+        );
+        prepared.kill_children().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(cgroup.join("cgroup.kill")).unwrap(),
+            "1"
+        );
     }
 }

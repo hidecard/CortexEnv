@@ -14,6 +14,7 @@ On Linux, `sandbox-core::linux` provides a fail-closed cgroup v2 controller mana
 - `attach_pid` writes the child PID to `cgroup.procs`.
 - The Python adapter only enables cgroup-backed execution when `CORTEXENV_CGROUP_ROOT` is explicitly set; it waits for a trusted launcher to stop, attaches the launcher, then sends `SIGCONT` before user code is read.
 - `CgroupV2::kill_all` writes `1` to `cgroup.kill` when available, and drop cleanup waits briefly for `cgroup.events` to report `populated 0` before removing the group.
+- `PreparedExecution::attach_child` attaches the future supervisor PID to the admitted cgroup before source release, while `PreparedExecution::kill_children` provides the parent-side cgroup-wide cancellation hook.
 - Missing cgroup v2 support or an unwritable controller causes `SandboxError::Isolation`; it never silently falls back to an unrestricted execution.
 - On supported Linux targets, the Python adapter uses a distinct process group and kills same-group descendants on timeout and leader exit before reaping the leader. This is best-effort process cleanup, not a containment boundary; a descendant may escape the group.
 
