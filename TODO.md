@@ -253,6 +253,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [ ] Alert rules ထည့်ရန်
 - [x] Startup configuration validation ထည့်ရန် — security mode is rejected before the API runtime starts when the supervisor is unavailable.
 - [ ] Safe defaults သတ်မှတ်ရန်
+- [x] Step-by-step local/API/Docker/security-smoke usage guide ရေးရန် — [`docs/quickstart.md`](docs/quickstart.md)
 - [ ] TLS/reverse proxy deployment guide ရေးရန်
 - [ ] Release artifacts pin/sign/scan လုပ်ရန်
 - [ ] Incident response runbook ရေးရန်

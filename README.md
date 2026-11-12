@@ -23,6 +23,8 @@
 
 Repository: <https://github.com/hidecard/CortexEnv>
 
+**Step-by-step usage:** start with [`docs/quickstart.md`](docs/quickstart.md) for local setup, trusted development mode, CLI/API examples, async jobs, authentication, Docker, cgroup configuration, isolation smoke tests, and troubleshooting.
+
 ## What CortexEnv does
 
 The project accepts an execution request containing a language, program payload, resource limits, and a network policy. The request is validated by `sandbox-common` and `sandbox-core`. The selected runtime then executes the program and returns a structured result containing an ID, exit status, stdout, stderr, timeout state, duration, and completion timestamp.
