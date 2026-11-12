@@ -131,7 +131,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [ ] Per-runtime filesystem/network policy သတ်မှတ်ရန်
 - [ ] Per-runtime resource profile သတ်မှတ်ရန်
 - [ ] Runtime version pinning ထည့်ရန်
-- [ ] Runtime capability discovery ထည့်ရန်
+- [x] Runtime capability discovery ထည့်ရန် — `sandbox-runtime::runtime_profiles()` and [`docs/runtime-profiles.md`](docs/runtime-profiles.md)
 - [ ] Runtime startup, signal, timeout behavior document လုပ်ရန်
 - [ ] Unsupported runtime request ကို clear error ဖြင့် reject လုပ်ရန်
 

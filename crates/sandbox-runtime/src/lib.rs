@@ -21,6 +21,82 @@ mod wasm;
 pub struct Runtime {
     engine: SandboxEngine,
 }
+
+/// Input encoding accepted by a runtime adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeInput {
+    /// Hexadecimal WebAssembly module bytes.
+    WasmHex,
+    /// UTF-8 source text.
+    SourceText,
+}
+
+/// Static capability and security profile for one runtime adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeProfile {
+    /// Runtime language exposed to callers.
+    pub language: Language,
+    /// Adapter/runtime name.
+    pub runtime: &'static str,
+    /// Expected request payload encoding.
+    pub input: RuntimeInput,
+    /// Whether the adapter launches a separate operating-system process.
+    pub child_process: bool,
+    /// Whether the adapter enforces a runtime-local timeout.
+    pub timeout: bool,
+    /// Whether the adapter enforces its runtime-local memory bound.
+    pub memory_limit: bool,
+    /// Network policies accepted by the current adapter.
+    pub network: &'static str,
+    /// Whether a complete host isolation boundary is active.
+    pub hostile_code_boundary: bool,
+}
+
+const RUNTIME_PROFILES: [RuntimeProfile; 3] = [
+    RuntimeProfile {
+        language: Language::Wasm,
+        runtime: "wasmtime",
+        input: RuntimeInput::WasmHex,
+        child_process: false,
+        timeout: true,
+        memory_limit: true,
+        network: "deny",
+        hostile_code_boundary: false,
+    },
+    RuntimeProfile {
+        language: Language::JavaScript,
+        runtime: "deno_core",
+        input: RuntimeInput::SourceText,
+        child_process: false,
+        timeout: true,
+        memory_limit: false,
+        network: "deny",
+        hostile_code_boundary: false,
+    },
+    RuntimeProfile {
+        language: Language::Python,
+        runtime: "python3",
+        input: RuntimeInput::SourceText,
+        child_process: true,
+        timeout: true,
+        memory_limit: true,
+        network: "deny",
+        hostile_code_boundary: false,
+    },
+];
+
+/// Return the capabilities of all currently registered runtime adapters.
+pub fn runtime_profiles() -> &'static [RuntimeProfile] {
+    &RUNTIME_PROFILES
+}
+
+/// Find the profile for one language.
+pub fn runtime_profile(language: Language) -> Option<&'static RuntimeProfile> {
+    runtime_profiles()
+        .iter()
+        .find(|profile| profile.language == language)
+}
+
 impl Default for Runtime {
     fn default() -> Self {
         Self::new().expect("default Wasmtime configuration must be valid")
@@ -41,6 +117,12 @@ impl Runtime {
             engine: SandboxEngine::new(),
         })
     }
+
+    /// Return the static capability profile for a requested language.
+    pub fn profile(language: Language) -> Option<&'static RuntimeProfile> {
+        runtime_profile(language)
+    }
+
     /// Execute a request. WASM `code` is a hex-encoded module; JavaScript and Python `code` is source text.
     pub async fn execute(
         &self,
@@ -103,6 +185,23 @@ impl Runtime {
 mod tests {
     use super::*;
     use sandbox_common::{Language, NetworkPolicy, ResourceLimits};
+
+    #[test]
+    fn discovers_all_registered_runtime_profiles() {
+        assert_eq!(runtime_profiles().len(), 3);
+        assert_eq!(
+            Runtime::profile(Language::Wasm).unwrap().runtime,
+            "wasmtime"
+        );
+        assert_eq!(
+            Runtime::profile(Language::JavaScript).unwrap().runtime,
+            "deno_core"
+        );
+        let python = Runtime::profile(Language::Python).unwrap();
+        assert!(python.child_process);
+        assert!(python.memory_limit);
+        assert!(!python.hostile_code_boundary);
+    }
 
     // Wasmtime 28's Windows epoch-trap unwind path can abort the test process
     // instead of returning a trap. Linux keeps this deadline regression test;
