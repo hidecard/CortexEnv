@@ -15,7 +15,7 @@
 
 **Recent WASM memory hardening:** Each Wasmtime store now enforces the request's `memory_bytes` limit on linear memory, permits only one instance and one linear memory, and traps when `memory.grow` exceeds the limit. This is a guest-memory bound, not a cap on total process, compiler, or host memory.
 
-**Recent process supervision progress:** On Linux targets with `waitid(WNOWAIT)` support, Python runs in its own process group; timeout and leader exit trigger cleanup before the leader is reaped. If a delegated cgroup root is configured, a trusted shell gate stops the launcher until the parent attaches it, and cgroup cleanup can also terminate descendants that changed process group when `cgroup.kill` is available.
+**Recent process supervision progress:** On Linux targets with `waitid(WNOWAIT)` support, Python runs in its own process group; timeout and leader exit trigger cleanup before the leader is reaped. If a delegated cgroup root is configured, the Python adapter now uses the prepared admission lifecycle: it reserves the workspace/cgroup, stops the launcher, attaches the child, obtains a source-release permit, and uses the admission cgroup for descendant cleanup. Namespace setup, UID/GID mapping, mount isolation, and runtime seccomp remain child-supervisor work.
 
 **Recent Linux resource-control progress:** `ResourceLimits.cpu_quota_millis` defaults to `1000` (one CPU core), accepts 100–64,000 milli-CPUs, and maps to cgroup v2 `cpu.max` with a 100 ms period. `CORTEXENV_CGROUP_ROOT` enables per-execution Python cgroups; missing controller files fail closed before Python source runs. The variable must point to a writable delegated cgroup v2 subtree with the required controllers enabled.
 

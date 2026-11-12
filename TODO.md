@@ -6,7 +6,7 @@ This is the authoritative implementation roadmap for **CortexEnv v0.1 Private An
 
 The repository already contains a Rust workspace, shared execution contracts, WASM and JavaScript adapters, a Python child adapter, cgroup v2 foundations, bounded API admission/history, request IDs, authentication, per-principal quotas, async job ownership, Prometheus metrics, OpenAI-compatible model access, bounded ReAct execution, Docker health checks, and a fail-closed child-hardening foundation for Linux namespaces, `RLIMIT_NOFILE`, `PR_SET_NO_NEW_PRIVS`, and capability clearing.
 
-The child-hardening foundation is not yet wired into a dedicated runtime supervisor. The pinned seccomp dependency is currently a placeholder, so production execution must remain fail-closed until a real runtime-specific seccomp-BPF backend, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision are implemented and tested in a disposable Linux environment. The prepared admission object now exposes explicit child-PID attach, cgroup-wide kill, and source-release permit operations for that future supervisor; the runtime adapters do not call them yet.
+The child-hardening foundation is not yet wired into a dedicated runtime supervisor. The pinned seccomp dependency is currently a placeholder, so production execution must remain fail-closed until a real runtime-specific seccomp-BPF backend, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision are implemented and tested in a disposable Linux environment. The Python adapter's optional `CORTEXENV_CGROUP_ROOT` path now calls the prepared admission lifecycle: cgroup/workspace preparation, stopped-child attach, source-release permit, and cgroup-wide cleanup. WASM/JavaScript wiring and namespace/seccomp runtime setup remain pending.
 
 The runtime now exposes `CORTEXENV_SECURITY_MODE`: `trusted` is development-only, while `restricted`/`production`/`hostile-code` fail closed during runtime startup and before any current adapter starts. This prevents an operator from accidentally treating the in-process adapters as a production sandbox, but it does not replace the dedicated child supervisor. Linux also has a fail-closed pre-spawn admission coordinator that validates the request, reserves a private workspace, and prepares the cgroup before source release.
 
@@ -89,6 +89,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [x] Private per-execution workspace ဖန်တီးရန်
 - [x] Source release မလုပ်မီ cgroup v2 ဖန်တီးရန်
 - [x] Child PID attach မပြီးမချင်း source-release permit မထုတ်ရန် (lifecycle contract)
+- [x] Python adapter optional cgroup path ကို prepared admission lifecycle နှင့် ချိတ်ရန်
 - [ ] Child နှင့် descendants များကို cgroup ထဲ attach လုပ်ရန်
 - [ ] CPU, memory, swap, pids limits enforce လုပ်ရန်
 - [ ] User namespace နှင့် unprivileged UID/GID mapping ထည့်ရန်

@@ -12,7 +12,7 @@ On Linux, `sandbox-core::linux` provides a fail-closed cgroup v2 controller mana
 - `pids.max` is set to the requested process ceiling.
 - `cpu.max` is set from `cpu_quota_millis` using a 100 ms period (`1000` milli-CPUs equals one CPU core).
 - `attach_pid` writes the child PID to `cgroup.procs`.
-- The Python adapter only enables cgroup-backed execution when `CORTEXENV_CGROUP_ROOT` is explicitly set; it waits for a trusted launcher to stop, attaches the launcher, then sends `SIGCONT` before user code is read.
+- The Python adapter only enables cgroup-backed execution when `CORTEXENV_CGROUP_ROOT` is explicitly set; it now obtains a `ChildSupervisor::prepare` admission, waits for a trusted launcher to stop, attaches the launcher through `PreparedExecution::attach_child`, obtains `ChildLaunchPermit`, then sends `SIGCONT` before user code is read.
 - `CgroupV2::kill_all` writes `1` to `cgroup.kill` when available, and drop cleanup waits briefly for `cgroup.events` to report `populated 0` before removing the group.
 - `PreparedExecution::attach_child` attaches the future supervisor PID to the admitted cgroup before source release, while `PreparedExecution::kill_children` provides the parent-side cgroup-wide cancellation hook.
 - `PreparedExecution::release_source` returns a `ChildLaunchPermit` only after a non-zero child PID has been attached; the future supervisor must hold this permit before writing source or starting the runtime.

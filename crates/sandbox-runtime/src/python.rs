@@ -19,7 +19,7 @@ use nix::{
 };
 use sandbox_common::{ExecutionRequest, ExecutionResult, NetworkPolicy, SandboxError};
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
-use sandbox_core::linux::CgroupV2;
+use sandbox_core::linux::{ChildSupervisor, ChildSupervisorConfig, PreparedExecution};
 use sandbox_core::ExecutionWorkspace;
 use std::{
     ffi::OsString,
@@ -64,7 +64,6 @@ async fn execute_with_cgroup_root(
     }
 
     let started = Instant::now();
-    let workspace = ExecutionWorkspace::new()?;
     let output_limit = request.limits.output_bytes;
     let stdout_capture = Arc::new(Mutex::new(Vec::new()));
     let stderr_capture = Arc::new(Mutex::new(Vec::new()));
@@ -72,20 +71,28 @@ async fn execute_with_cgroup_root(
     let stderr_for_run = Arc::clone(&stderr_capture);
     let code = request.code.clone();
     let interpreter = python_executable();
-    let workspace_path = workspace.root().to_path_buf();
     #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
-    let cgroup: Option<CgroupHandle> = cgroup_root
-        .map(|root| CgroupV2::create(root, request.id, &request.limits))
-        .transpose()?;
+    let admission = if let Some(root) = cgroup_root {
+        ExecutionAdmission::Prepared(ChildSupervisor.prepare(
+            request,
+            &ChildSupervisorConfig {
+                cgroup_root: Some(root.to_path_buf()),
+                require_cgroup: true,
+            },
+        )?)
+    } else {
+        ExecutionAdmission::Workspace(ExecutionWorkspace::new()?)
+    };
     #[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
-    let cgroup: Option<CgroupHandle> = if cgroup_root.is_some() {
+    let admission = if cgroup_root.is_some() {
         return Err(SandboxError::Isolation);
     } else {
-        None
+        ExecutionWorkspace::new()?
     };
+    let workspace_path = admission.workspace_path();
     let execution =
         async move {
-            let mut command = python_command(interpreter, cgroup.is_some());
+            let mut command = python_command(interpreter, admission.requires_attach());
             #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
             command.process_group(0);
             command
@@ -101,16 +108,12 @@ async fn execute_with_cgroup_root(
             let mut child = command.spawn().map_err(|error| {
                 SandboxError::Runtime(format!("could not start Python: {error}"))
             })?;
-            let mut process_group = ProcessGroupGuard::new(child.id(), cgroup)?;
+            let mut process_group = ProcessGroupGuard::new(child.id(), Some(admission))?;
             #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
-            if process_group.cgroup().is_some() {
+            if process_group.requires_attach() {
                 wait_for_child_stop(&mut child).await?;
-                let pid = child.id().ok_or(SandboxError::Isolation)?;
-                process_group
-                    .cgroup()
-                    .ok_or(SandboxError::Isolation)?
-                    .attach_pid(pid)?;
-                resume_child(pid)?;
+                process_group.attach_and_release(child.id().ok_or(SandboxError::Isolation)?)?;
+                resume_child(child.id().ok_or(SandboxError::Isolation)?)?;
             }
 
             let stdin = child.stdin.take().ok_or_else(|| {
@@ -186,10 +189,38 @@ fn python_executable() -> OsString {
 }
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
-type CgroupHandle = CgroupV2;
+enum ExecutionAdmission {
+    Prepared(PreparedExecution),
+    Workspace(ExecutionWorkspace),
+}
+
+#[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
+impl ExecutionAdmission {
+    fn workspace_path(&self) -> PathBuf {
+        match self {
+            Self::Prepared(prepared) => prepared.workspace().root().to_path_buf(),
+            Self::Workspace(workspace) => workspace.root().to_path_buf(),
+        }
+    }
+
+    fn requires_attach(&self) -> bool {
+        matches!(self, Self::Prepared(_))
+    }
+}
 
 #[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
-type CgroupHandle = ();
+type ExecutionAdmission = ExecutionWorkspace;
+
+#[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
+impl ExecutionAdmission {
+    fn workspace_path(&self) -> PathBuf {
+        self.root().to_path_buf()
+    }
+
+    fn requires_attach(&self) -> bool {
+        false
+    }
+}
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 fn python_command(interpreter: OsString, wait_for_cgroup: bool) -> Command {
@@ -233,23 +264,34 @@ fn resolve_python_for_shell(executable: OsString) -> OsString {
 struct ProcessGroupGuard {
     pgid: Pid,
     armed: bool,
-    cgroup: Option<CgroupV2>,
+    admission: Option<ExecutionAdmission>,
 }
 
 #[cfg(all(target_os = "linux", not(target_env = "uclibc")))]
 impl ProcessGroupGuard {
-    fn new(pid: Option<u32>, cgroup: Option<CgroupV2>) -> Result<Self, SandboxError> {
+    fn new(pid: Option<u32>, admission: Option<ExecutionAdmission>) -> Result<Self, SandboxError> {
         let pid = pid.ok_or(SandboxError::Isolation)?;
         let pid = i32::try_from(pid).map_err(|_| SandboxError::Isolation)?;
         Ok(Self {
             pgid: Pid::from_raw(pid),
             armed: true,
-            cgroup,
+            admission,
         })
     }
 
-    fn cgroup(&self) -> Option<&CgroupV2> {
-        self.cgroup.as_ref()
+    fn requires_attach(&self) -> bool {
+        self.admission
+            .as_ref()
+            .is_some_and(ExecutionAdmission::requires_attach)
+    }
+
+    fn attach_and_release(&mut self, pid: u32) -> Result<(), SandboxError> {
+        let Some(ExecutionAdmission::Prepared(prepared)) = self.admission.as_mut() else {
+            return Err(SandboxError::Isolation);
+        };
+        prepared.attach_child(pid)?;
+        let _permit = prepared.release_source()?;
+        Ok(())
     }
 
     fn terminate(&mut self) -> Result<(), SandboxError> {
@@ -260,8 +302,8 @@ impl ProcessGroupGuard {
                 Err(_) => break Err(SandboxError::Isolation),
             }
         };
-        if let Some(cgroup) = &self.cgroup {
-            let _ = cgroup.kill_all();
+        if let Some(ExecutionAdmission::Prepared(prepared)) = &self.admission {
+            let _ = prepared.kill_children();
         }
         if result.is_ok() {
             self.armed = false;
@@ -310,7 +352,10 @@ struct ProcessGroupGuard;
 
 #[cfg(not(all(target_os = "linux", not(target_env = "uclibc"))))]
 impl ProcessGroupGuard {
-    fn new(_pid: Option<u32>, _cgroup: Option<()>) -> Result<Self, SandboxError> {
+    fn new(
+        _pid: Option<u32>,
+        _admission: Option<ExecutionAdmission>,
+    ) -> Result<Self, SandboxError> {
         Ok(Self)
     }
 }
