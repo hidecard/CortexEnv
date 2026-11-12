@@ -27,7 +27,7 @@ The function currently fails closed when seccomp is required because the pinned 
 
 ## Production safety gate
 
-`CORTEXENV_SECURITY_MODE` controls whether the current in-process adapters may run. `trusted` is the backwards-compatible development default. `restricted`, `production`, and `hostile-code` return `SandboxError::Isolation` before any runtime adapter starts, because the dedicated child supervisor and real runtime-specific seccomp profile are not yet wired. Production deployments must set `CORTEXENV_SECURITY_MODE=restricted`; changing the value to `trusted` is an explicit decision to run only trusted local code and is not a hostile-code security boundary.
+`CORTEXENV_SECURITY_MODE` controls whether the current in-process adapters may run. `trusted` is the backwards-compatible development default. `restricted`, `production`, and `hostile-code` cause `Runtime::new` to fail with `SandboxError::Isolation` before the API service can start; the execute-time check remains defense in depth for callers that already hold a runtime. This is required because the dedicated child supervisor and real runtime-specific seccomp profile are not yet wired. Production deployments must set `CORTEXENV_SECURITY_MODE=restricted`; changing the value to `trusted` is an explicit decision to run only trusted local code and is not a hostile-code security boundary.
 
 ## Required child-supervisor sequence
 

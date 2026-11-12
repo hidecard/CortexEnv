@@ -355,7 +355,7 @@ The [security testing checklist](docs/security-testing.md) separates current aut
 
 JavaScript runs in an in-process V8 isolate with a minimal console-only op set; the V8 deadline can terminate synchronous script execution, but OS memory/process limits are not enforced. Python runs as a direct child with isolated interpreter startup, a temporary working directory, cleared inherited environment, a deadline, and bounded captured output. It can still access files and network available to the service account and can spawn descendants that are not killed with the parent. Do not execute hostile or untrusted JavaScript/Python in the current implementation.
 
-The runtime now has an explicit `CORTEXENV_SECURITY_MODE` gate. `trusted` (the backwards-compatible development default) permits the current adapters; `restricted`, `production`, and `hostile-code` fail closed with an isolation error until the dedicated OS child supervisor is wired and its controls are active. Production deployments must set `CORTEXENV_SECURITY_MODE=restricted` rather than relying on the development default.
+The runtime now has an explicit `CORTEXENV_SECURITY_MODE` gate. `trusted` (the backwards-compatible development default) permits the current adapters; `restricted`, `production`, and `hostile-code` fail closed during `Runtime::new` before the API listener can start, with an execute-time check as defense in depth. Production deployments must set `CORTEXENV_SECURITY_MODE=restricted` rather than relying on the development default.
 
 - PID, mount, network, UTS, IPC, and user namespaces
 - cgroup CPU, memory, process, and file-descriptor enforcement

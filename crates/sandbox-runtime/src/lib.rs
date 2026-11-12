@@ -29,6 +29,10 @@ impl Default for Runtime {
 impl Runtime {
     /// Create a runtime with a conservative Wasmtime engine.
     pub fn new() -> Result<Self, SandboxError> {
+        // Do not start a service in a production-oriented mode until the
+        // dedicated OS child supervisor is available. The execute-time gate
+        // remains as defense in depth for callers that already hold a Runtime.
+        SecurityMode::configured()?.ensure_in_process_execution_allowed()?;
         // Validate Wasmtime configuration at service startup. Each execution
         // receives a distinct Engine so one job's timeout tick cannot interrupt
         // unrelated jobs sharing a global epoch counter.

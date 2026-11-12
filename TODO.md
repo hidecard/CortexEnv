@@ -8,7 +8,7 @@ The repository already contains a Rust workspace, shared execution contracts, WA
 
 The child-hardening foundation is not yet wired into a dedicated runtime supervisor. The pinned seccomp dependency is currently a placeholder, so production execution must remain fail-closed until a real runtime-specific seccomp-BPF backend, UID/GID mapping, mount setup, cgroup attachment, and parent-side lifecycle supervision are implemented and tested in a disposable Linux environment.
 
-The runtime now exposes `CORTEXENV_SECURITY_MODE`: `trusted` is development-only, while `restricted`/`production`/`hostile-code` fail closed before any current adapter starts. This prevents an operator from accidentally treating the in-process adapters as a production sandbox, but it does not replace the dedicated child supervisor.
+The runtime now exposes `CORTEXENV_SECURITY_MODE`: `trusted` is development-only, while `restricted`/`production`/`hostile-code` fail closed during runtime startup and before any current adapter starts. This prevents an operator from accidentally treating the in-process adapters as a production sandbox, but it does not replace the dedicated child supervisor. Linux also has a fail-closed pre-spawn admission coordinator that validates the request, reserves a private workspace, and prepares the cgroup before source release.
 
 Phase 1 test scripts are available under [`scripts/security`](scripts/security/): they run safe unit checks, a forked-child kernel seccomp primitive probe, an opt-in namespace/user-mapping probe, and a read-only cgroup v2 delegated-root preflight. These scripts provide prerequisite evidence only; they do not mark the production supervisor or runtime-specific seccomp profile complete.
 
@@ -251,7 +251,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [ ] Metrics endpoint ကို private/authenticated လုပ်ရန်
 - [ ] Dashboards ထည့်ရန်
 - [ ] Alert rules ထည့်ရန်
-- [ ] Startup configuration validation ထည့်ရန်
+- [x] Startup configuration validation ထည့်ရန် — security mode is rejected before the API runtime starts when the supervisor is unavailable.
 - [ ] Safe defaults သတ်မှတ်ရန်
 - [ ] TLS/reverse proxy deployment guide ရေးရန်
 - [ ] Release artifacts pin/sign/scan လုပ်ရန်
