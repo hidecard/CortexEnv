@@ -52,13 +52,6 @@ pub(crate) async fn execute(request: &ExecutionRequest) -> Result<ExecutionResul
     execute_with_options(request, cgroup_root.as_deref(), use_linux_namespaces).await
 }
 
-async fn execute_with_cgroup_root(
-    request: &ExecutionRequest,
-    cgroup_root: Option<&Path>,
-) -> Result<ExecutionResult, SandboxError> {
-    execute_with_options(request, cgroup_root, false).await
-}
-
 async fn execute_with_options(
     request: &ExecutionRequest,
     cgroup_root: Option<&Path>,
@@ -705,7 +698,7 @@ mod tests {
         let marker_literal = serde_json::to_string(marker.to_str().unwrap()).unwrap();
         let request = request(&format!("open({marker_literal}, 'w').write('started')"));
 
-        let result = execute_with_cgroup_root(&request, Some(&root)).await;
+        let result = execute_with_options(&request, Some(&root), false).await;
 
         assert!(matches!(result, Err(SandboxError::Isolation)));
         assert!(!marker.exists());
