@@ -11,6 +11,8 @@
 
 **Isolation progress:** Linux now has a fail-closed pre-spawn admission coordinator in `sandbox-core`. It validates the request, creates a private per-execution workspace, prepares a cgroup v2 before source may be released to a child, and exposes attach/kill lifecycle operations plus a `ChildLaunchPermit` that cannot be issued before child attachment. The child-only hardening primitive now uses upstream `seccompiler` 0.5 to compile and install a baseline WASM denylist filter. This filter is not an allowlist or a complete sandbox, and no runtime-specific filter is wired into current launch paths. Python additionally has an opt-in bubblewrap path for user/mount/PID/network/IPC/UTS namespaces, read-only root/system binds, bounded private tmpfs locations, and capability dropping. Complete child-supervisor integration and UID/GID/filesystem/deployment guarantees remain uncertified.
 
+The control-by-control implementation/evidence boundary is recorded in [`docs/security-evidence-matrix.md`](docs/security-evidence-matrix.md). Simulated cgroup file tests are intentionally not presented as proof of kernel-enforced hostile-code isolation.
+
 **Recent runtime progress:** WASM deadlines now use a per-execution Wasmtime engine and repeated epoch ticks, preventing a deadline tick during module compilation from leaving an infinite guest loop running and preventing one execution's timeout from interrupting another.
 
 **Recent WASM memory hardening:** Each Wasmtime store now enforces the request's `memory_bytes` limit on linear memory, permits only one instance and one linear memory, and traps when `memory.grow` exceeds the limit. This is a guest-memory bound, not a cap on total process, compiler, or host memory.

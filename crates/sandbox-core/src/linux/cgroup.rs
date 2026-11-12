@@ -191,6 +191,20 @@ mod tests {
     }
 
     #[test]
+    fn attach_pid_writes_the_child_to_cgroup_procs() {
+        let root = tempdir().unwrap();
+        let procs = root.path().join("cgroup.procs");
+        fs::write(&procs, "").unwrap();
+        let cgroup = CgroupV2 {
+            path: root.path().to_path_buf(),
+        };
+
+        cgroup.attach_pid(4242).unwrap();
+
+        assert_eq!(fs::read_to_string(procs).unwrap(), "4242");
+    }
+
+    #[test]
     fn cgroup_creation_fails_closed_without_v2_controller() {
         let root = tempdir().unwrap();
         assert!(CgroupV2::create(root.path(), Uuid::new_v4(), &ResourceLimits::default()).is_err());

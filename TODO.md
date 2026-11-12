@@ -85,6 +85,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 ## Phase 2 — Secure Child Supervisor and Linux Isolation
 
 ### Goal Untrusted code ကို API process ထဲတွင် မလုပ်ဘဲ fail-closed child supervisor မှတစ်ဆင့် အထီးကျန် run စေရန်။
+> `restricted`/`production` mode တွင် server health/metrics စတင်နိုင်သော်လည်း required isolation preflight မအောင်မြင်ပါက execution request အားလုံးကို fail closed လုပ်ရမည်။ `hostile-code` claim သည် independent security review မပြီးမချင်း မရရှိသေးပါ။
 - [ ] Per-execution child supervisor တည်ဆောက်ရန်
 - [x] Request validation ကို child spawn မလုပ်မီ အပြီးလုပ်ရန်
 - [x] Private per-execution workspace ဖန်တီးရန်
@@ -95,7 +96,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [x] Conditional harmless Python namespace smoke test for namespace IDs, filesystem/tmpfs limits, capability state, workspace writes, and host-loopback separation
 - The remaining unchecked namespace, capability, filesystem, and network items below mean complete child-supervisor enforcement, verified UID/GID mapping, and support across runtimes/deployments; the Python opt-in does not satisfy those release gates.
 - [ ] Child နှင့် descendants များကို cgroup ထဲ attach လုပ်ရန်
-- [ ] CPU, memory, swap, pids limits enforce လုပ်ရန်
+- [x] CPU, memory, swap, pids limits ကို cgroup v2 configuration အဖြစ်ရေးရန်; kernel exhaustion evidence မပြီးသေး
 - [ ] User namespace နှင့် unprivileged UID/GID mapping ထည့်ရန်
 - [ ] Mount namespace ထည့်ရန်
 - [ ] PID namespace ထည့်ရန်
@@ -110,7 +111,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [ ] Default-deny network policy enforce လုပ်ရန်
 - [ ] Filesystem access ကို explicit workspace/input/output mount များထဲတွင် ကန့်သတ်ရန်
 - [ ] Process-tree cancellation နှင့် descendant cleanup ထည့်ရန်
-- [ ] cgroup kill support အသုံးပြုရန်
+- [x] cgroup kill support အသုံးပြုရန်; real supervisor cancellation integration မပြီးသေး
 - [ ] Stdout/stderr backpressure ထည့်ရန်
 - [ ] Output size cap ထည့်ရန်
 - [ ] Required isolation control မရှိပါက fail closed လုပ်ရန်
@@ -119,20 +120,21 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 ### Exit gate
 
 - [x] Supervisor မပါဘဲ explicit restricted/production/hostile-code mode မ run နိုင်ရန်
-- Isolation control ပျက်ပါက request ကို block လုပ်ရန်
-- API process crash မဖြစ်ဘဲ child failure ကို handle လုပ်နိုင်ရန်
+- [ ] Isolation control ပျက်ပါက request ကို block လုပ်ရန် — preflight/route integration evidence လိုသေးသည်
+- [ ] API process crash မဖြစ်ဘဲ child failure ကို handle လုပ်နိုင်ရန် — real child supervisor လိုသေးသည်
 
 ## Phase 3 — Python and WASM Runtime Profiles
 
 ### Goal Runtime နှစ်ခုကိုသာ security profile ပြည့်စုံစွာ ထောက်ပံ့ရန်။
-- [ ] Python runtime startup command သတ်မှတ်ရန်
-- [ ] Python process-group cleanup ထည့်ရန်
+> လက်ရှိ WASM timeout/memory နှင့် Python child-process cleanup သည် baseline implementation ဖြစ်ပြီး full security profile မဟုတ်ပါ။ Phase 2 isolation ပြီးမှ runtime profile complete ဟု သတ်မှတ်မည်။
+- [x] Python runtime startup command သတ်မှတ်ရန်
+- [x] Python process-group cleanup ထည့်ရန်
 - [ ] Python environment template သတ်မှတ်ရန်
 - [ ] Allowlisted packages ထည့်ရန် — pandas, polars, numpy, matplotlib, scipy လိုအပ်သလောက်
-- [ ] Package installation ကို default ပိတ်ရန်
-- [ ] WASM/WASI runtime profile သတ်မှတ်ရန်
-- [ ] WASM epoch timeout ထည့်ရန်
-- [ ] WASM memory limit enforce လုပ်ရန်
+- [x] Package installation ကို default ပိတ်ရန်
+- [x] WASM/WASI runtime profile သတ်မှတ်ရန် — core WASM profile; WASI capabilities မပေးသေး
+- [x] WASM epoch timeout ထည့်ရန်
+- [x] WASM memory limit enforce လုပ်ရန်
 - [ ] Per-runtime filesystem/network policy သတ်မှတ်ရန်
 - [ ] Per-runtime resource profile သတ်မှတ်ရန်
 - [ ] Runtime version pinning ထည့်ရန်
@@ -179,6 +181,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [x] Add guarded namespace and kernel-seccomp smoke scripts that never submit code to the API.
 - [x] Add a read-only cgroup v2 controller/delegated-root preflight to the Phase 1 smoke runner.
 - [ ] Run the smoke scripts in the supported disposable Linux VM/CI environment and attach versioned evidence.
+- [x] Phase 2 control-by-control evidence matrix ကို child supervisor controls နှင့် ချိတ်ရန်
 - [ ] Independent security review ပြုလုပ်ရန်
 - [ ] Known limitations နှင့် disclosure policy ထုတ်ပြန်ရန်
 
