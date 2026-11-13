@@ -11,7 +11,8 @@ This matrix separates implemented mechanisms from evidence that requires a real 
 | CPU, memory, swap, and pids limits | `cpu.max`, `memory.max`, `memory.swap.max=0`, and `pids.max` are written | File-write tests pass; kernel exhaustion tests pending | Blocks hostile-code claim |
 | cgroup kill | `cgroup.kill` is used during cleanup when available | Simulated controller test passes; descendant test pending | Required for cancellation |
 | User/mount/PID/network namespaces | Child-side namespace flags exist in the hardening primitive | No real child integration evidence | Blocks restricted/production |
-| UID/GID mapping and read-only root | Not implemented as a complete launch handoff | No evidence | Blocks restricted/production |
+| UID/GID mapping | Child-side primitive writes `setgroups=deny`, `uid_map`, and `gid_map` for the launching identity | Unit compilation only; disposable VM launch evidence pending | Blocks restricted/production |
+| Read-only runtime root | Not implemented as a complete launch handoff | No evidence | Blocks restricted/production |
 | `no_new_privs` and capability drop | Child-side primitive calls the relevant controls | No real child integration evidence | Blocks hostile-code claim |
 | seccomp BPF | Intentionally fails closed because the pinned backend is not a usable filter implementation | Negative fail-closed test only | Execution must be blocked when required |
 | Network deny and filesystem boundary | Policy and workspace validation exist, but kernel boundary is pending | No adversarial kernel evidence | Blocks restricted/production |

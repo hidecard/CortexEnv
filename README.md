@@ -13,6 +13,8 @@
 
 The control-by-control implementation/evidence boundary is recorded in [`docs/security-evidence-matrix.md`](docs/security-evidence-matrix.md). Simulated cgroup file tests are intentionally not presented as proof of kernel-enforced hostile-code isolation.
 
+The Linux child hardening primitive now maps the launching identity into a fresh user namespace (`setgroups=deny`, `uid_map`, and `gid_map`) before applying the remaining namespace controls. This primitive is fail-closed and is not a claim that every runtime already uses the complete supervisor launch path.
+
 **Recent runtime progress:** WASM deadlines now use a per-execution Wasmtime engine and repeated epoch ticks, preventing a deadline tick during module compilation from leaving an infinite guest loop running and preventing one execution's timeout from interrupting another.
 
 **Recent WASM memory hardening:** Each Wasmtime store now enforces the request's `memory_bytes` limit on linear memory, permits only one instance and one linear memory, and traps when `memory.grow` exceeds the limit. This is a guest-memory bound, not a cap on total process, compiler, or host memory.

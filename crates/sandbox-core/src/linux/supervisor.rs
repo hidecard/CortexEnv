@@ -9,8 +9,10 @@ use capctl::{caps::CapState, prctl};
 use nix::{
     sched::{unshare, CloneFlags},
     sys::resource::{rlim_t, setrlimit, Resource},
+    unistd::{getegid, geteuid},
 };
 use sandbox_common::{ResourceLimits, SandboxError};
+use std::{fs, path::Path};
 
 /// Child-side hardening options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +25,8 @@ pub struct ChildIsolationConfig {
     pub seccomp_profile: SeccompProfile,
     /// Drop effective, permitted, inheritable, ambient, and bounding capabilities.
     pub drop_capabilities: bool,
+    /// Map the launching uid/gid to an unprivileged identity in the user namespace.
+    pub map_user_namespace: bool,
 }
 
 impl Default for ChildIsolationConfig {
@@ -32,6 +36,7 @@ impl Default for ChildIsolationConfig {
             require_seccomp: true,
             seccomp_profile: SeccompProfile::Wasm,
             drop_capabilities: true,
+            map_user_namespace: true,
         }
     }
 }
@@ -50,9 +55,12 @@ pub fn apply_child_isolation(
     limits.validate()?;
 
     if config.namespaces {
+        unshare(CloneFlags::CLONE_NEWUSER).map_err(|_| SandboxError::Isolation)?;
+        if config.map_user_namespace {
+            map_current_user_namespace()?;
+        }
         unshare(
-            CloneFlags::CLONE_NEWUSER
-                | CloneFlags::CLONE_NEWNS
+            CloneFlags::CLONE_NEWNS
                 | CloneFlags::CLONE_NEWPID
                 | CloneFlags::CLONE_NEWNET
                 | CloneFlags::CLONE_NEWUTS
@@ -85,6 +93,29 @@ pub fn apply_child_isolation(
     Ok(())
 }
 
+/// Map the current process identity to uid/gid 0 inside its fresh user namespace.
+///
+/// The mapping is deliberately one-to-one with the launching host identity: uid 0
+/// is only namespace-local and the capability bounding set is cleared later in the
+/// same child. `setgroups` is denied before writing `gid_map`, as required by the
+/// kernel for an unprivileged gid mapping.
+#[cfg(target_os = "linux")]
+fn map_current_user_namespace() -> Result<(), SandboxError> {
+    let uid = geteuid().as_raw();
+    let gid = getegid().as_raw();
+    let setgroups = Path::new("/proc/self/setgroups");
+    if setgroups.exists() {
+        fs::write(setgroups, "deny").map_err(|_| SandboxError::Isolation)?;
+    }
+    write_mapping("/proc/self/uid_map", uid)?;
+    write_mapping("/proc/self/gid_map", gid)
+}
+
+#[cfg(target_os = "linux")]
+fn write_mapping(path: &str, host_id: u32) -> Result<(), SandboxError> {
+    fs::write(path, format!("0 {host_id} 1\n")).map_err(|_| SandboxError::Isolation)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +127,7 @@ mod tests {
         assert!(config.require_seccomp);
         assert_eq!(config.seccomp_profile, SeccompProfile::Wasm);
         assert!(config.drop_capabilities);
+        assert!(config.map_user_namespace);
     }
 
     #[test]

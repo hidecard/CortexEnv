@@ -97,7 +97,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - The remaining unchecked namespace, capability, filesystem, and network items below mean complete child-supervisor enforcement, verified UID/GID mapping, and support across runtimes/deployments; the Python opt-in does not satisfy those release gates.
 - [ ] Child နှင့် descendants များကို cgroup ထဲ attach လုပ်ရန်
 - [x] CPU, memory, swap, pids limits ကို cgroup v2 configuration အဖြစ်ရေးရန်; kernel exhaustion evidence မပြီးသေး
-- [ ] User namespace နှင့် unprivileged UID/GID mapping ထည့်ရန်
+- [x] Child-side user namespace နှင့် unprivileged UID/GID mapping primitive ထည့်ရန်; general supervisor launch integration နှင့် VM evidence မပြီးသေး
 - [ ] Mount namespace ထည့်ရန်
 - [ ] PID namespace ထည့်ရန်
 - [ ] Network namespace ထည့်ရန်
