@@ -7,6 +7,7 @@
 use super::{seccomp::apply_seccomp_profile, SeccompProfile};
 use capctl::{caps::CapState, prctl};
 use nix::{
+    mount::{mount, MsFlags},
     sched::{unshare, CloneFlags},
     sys::resource::{rlim_t, setrlimit, Resource},
     unistd::{getegid, geteuid},
@@ -93,6 +94,53 @@ pub fn apply_child_isolation(
     Ok(())
 }
 
+/// Prepare a private mount namespace with an explicit writable workspace and a
+/// read-only runtime root.
+///
+/// This helper must run after `CLONE_NEWNS` has been created in the child. It
+/// never changes mounts in the API process. The runtime root must already be a
+/// directory supplied by the supervisor; selecting and pivoting to a minimal
+/// root filesystem remains a separate launch integration step.
+#[cfg(target_os = "linux")]
+pub fn prepare_mount_namespace(workspace: &Path, runtime_root: &Path) -> Result<(), SandboxError> {
+    if !workspace.is_dir() || !runtime_root.is_dir() {
+        return Err(SandboxError::Isolation);
+    }
+
+    mount(
+        None::<&Path>,
+        Path::new("/"),
+        None::<&str>,
+        MsFlags::MS_REC | MsFlags::MS_PRIVATE,
+        None::<&str>,
+    )
+    .map_err(|_| SandboxError::Isolation)?;
+    mount(
+        Some(workspace),
+        workspace,
+        None::<&str>,
+        MsFlags::MS_BIND | MsFlags::MS_REC,
+        None::<&str>,
+    )
+    .map_err(|_| SandboxError::Isolation)?;
+    mount(
+        Some(runtime_root),
+        runtime_root,
+        None::<&str>,
+        MsFlags::MS_BIND | MsFlags::MS_REC,
+        None::<&str>,
+    )
+    .map_err(|_| SandboxError::Isolation)?;
+    mount(
+        None::<&Path>,
+        runtime_root,
+        None::<&str>,
+        MsFlags::MS_BIND | MsFlags::MS_REMOUNT | MsFlags::MS_RDONLY | MsFlags::MS_REC,
+        None::<&str>,
+    )
+    .map_err(|_| SandboxError::Isolation)
+}
+
 /// Map the current process identity to uid/gid 0 inside its fresh user namespace.
 ///
 /// The mapping is deliberately one-to-one with the launching host identity: uid 0
@@ -128,6 +176,15 @@ mod tests {
         assert_eq!(config.seccomp_profile, SeccompProfile::Wasm);
         assert!(config.drop_capabilities);
         assert!(config.map_user_namespace);
+    }
+
+    #[test]
+    fn mount_namespace_rejects_missing_sources_before_kernel_mutation() {
+        assert!(prepare_mount_namespace(
+            Path::new("/definitely/missing/workspace"),
+            Path::new("/definitely/missing/runtime"),
+        )
+        .is_err());
     }
 
     #[test]

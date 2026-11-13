@@ -10,7 +10,7 @@ mod seccomp;
 mod supervisor;
 pub use cgroup::{detect_cgroup_v2, CgroupLimits, CgroupV2};
 pub use seccomp::SeccompProfile;
-pub use supervisor::{apply_child_isolation, ChildIsolationConfig};
+pub use supervisor::{apply_child_isolation, prepare_mount_namespace, ChildIsolationConfig};
 
 use crate::ExecutionWorkspace;
 use sandbox_common::{ExecutionRequest, ResourceLimits, SandboxError};

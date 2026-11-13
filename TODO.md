@@ -98,11 +98,11 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 - [ ] Child နှင့် descendants များကို cgroup ထဲ attach လုပ်ရန်
 - [x] CPU, memory, swap, pids limits ကို cgroup v2 configuration အဖြစ်ရေးရန်; kernel exhaustion evidence မပြီးသေး
 - [x] Child-side user namespace နှင့် unprivileged UID/GID mapping primitive ထည့်ရန်; general supervisor launch integration နှင့် VM evidence မပြီးသေး
-- [ ] Mount namespace ထည့်ရန်
+- [x] Child-side mount namespace ကို private propagation အဖြစ်ပြင်ရန်; complete launch integration မပြီးသေး
 - [ ] PID namespace ထည့်ရန်
 - [ ] Network namespace ထည့်ရန်
-- [ ] Minimal read-only runtime root ထည့်ရန်
-- [ ] Writable workspace mount သီးခြားထားရန်
+- [x] Supplied runtime root ကို read-only bind-remount primitive ထည့်ရန်; pivot/chroot minimal root selection မပြီးသေး
+- [x] Supplied workspace ကို သီးခြား writable bind mount primitive ထည့်ရန်; full host-root hiding မပြီးသေး
 - [ ] Host paths, secrets, Docker socket, application data မ inheritance ဖြစ်စေရန်
 - [ ] `PR_SET_NO_NEW_PRIVS` သတ်မှတ်ရန်
 - [ ] Linux capabilities drop လုပ်ရန်
