@@ -87,6 +87,7 @@ Phase 1 test scripts are available under [`scripts/security`](scripts/security/)
 ### Goal Untrusted code ကို API process ထဲတွင် မလုပ်ဘဲ fail-closed child supervisor မှတစ်ဆင့် အထီးကျန် run စေရန်။
 > `restricted`/`production` mode တွင် server health/metrics စတင်နိုင်သော်လည်း required isolation preflight မအောင်မြင်ပါက execution request အားလုံးကို fail closed လုပ်ရမည်။ `hostile-code` claim သည် independent security review မပြီးမချင်း မရရှိသေးပါ။
 - [ ] Per-execution child supervisor တည်ဆောက်ရန်
+- [x] Prepared execution မှ runtime root, workspace, isolation config ပါသော typed child-launch handoff spec ထုတ်ရန်; actual fork/exec supervisor မပြီးသေး
 - [x] Request validation ကို child spawn မလုပ်မီ အပြီးလုပ်ရန်
 - [x] Private per-execution workspace ဖန်တီးရန်
 - [x] Source release မလုပ်မီ cgroup v2 ဖန်တီးရန်

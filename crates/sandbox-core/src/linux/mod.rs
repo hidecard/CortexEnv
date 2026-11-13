@@ -61,6 +61,23 @@ pub struct PreparedExecution {
     child_pid: Option<u32>,
 }
 
+/// Fully validated inputs that a dedicated child launcher must consume.
+///
+/// This is a handoff contract, not a process handle. The caller must still
+/// create the child, apply `isolation`, attach the child PID, and release source
+/// only after obtaining a [`ChildLaunchPermit`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildLaunchSpec {
+    /// Request associated with the child.
+    pub request_id: Uuid,
+    /// Workspace that may be mounted writable for the child.
+    pub workspace: PathBuf,
+    /// Runtime root that the child must mount read-only.
+    pub runtime_root: PathBuf,
+    /// Child-only hardening configuration to apply before runtime startup.
+    pub isolation: ChildIsolationConfig,
+}
+
 impl std::fmt::Debug for PreparedExecution {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PreparedExecution")
@@ -86,6 +103,28 @@ impl PreparedExecution {
     /// cgroup path when a cgroup was successfully prepared.
     pub fn cgroup_path(&self) -> Option<&Path> {
         self.cgroup.as_ref().map(CgroupV2::path)
+    }
+
+    /// Build a launch handoff only when the runtime root and cgroup admission
+    /// are ready. The returned spec does not release source or start a process.
+    pub fn launch_spec(
+        &self,
+        runtime_root: impl AsRef<Path>,
+        isolation: ChildIsolationConfig,
+    ) -> Result<ChildLaunchSpec, SandboxError> {
+        if self.cgroup.is_none() || !self.workspace.root().is_dir() {
+            return Err(SandboxError::Isolation);
+        }
+        let runtime_root = runtime_root.as_ref();
+        if !runtime_root.is_dir() {
+            return Err(SandboxError::Isolation);
+        }
+        Ok(ChildLaunchSpec {
+            request_id: self.request_id,
+            workspace: self.workspace.root().to_path_buf(),
+            runtime_root: runtime_root.to_path_buf(),
+            isolation,
+        })
     }
 
     /// Attach the supervisor child to the prepared cgroup before releasing source.
@@ -307,5 +346,33 @@ mod tests {
         assert_eq!(permit.request_id(), request.id);
         assert_eq!(permit.child_pid(), 4243);
         assert_eq!(permit.workspace(), prepared.workspace().root());
+    }
+
+    #[test]
+    fn launch_spec_requires_an_existing_runtime_root() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("cgroup.controllers"), "cpu memory pids").unwrap();
+        let request = ExecutionRequest {
+            id: Uuid::new_v4(),
+            language: sandbox_common::Language::Wasm,
+            code: "0061736d01000000".into(),
+            limits: ResourceLimits::default(),
+            network: sandbox_common::NetworkPolicy::Deny,
+        };
+        let prepared = ChildSupervisor
+            .prepare(
+                &request,
+                &ChildSupervisorConfig {
+                    cgroup_root: Some(root.path().to_path_buf()),
+                    require_cgroup: true,
+                },
+            )
+            .unwrap();
+        assert!(prepared
+            .launch_spec(
+                "/definitely/missing/runtime",
+                ChildIsolationConfig::default()
+            )
+            .is_err());
     }
 }

@@ -18,6 +18,7 @@ On Linux, `sandbox-core::linux` provides a fail-closed cgroup v2 controller mana
 - `CgroupV2::kill_all` writes `1` to `cgroup.kill` when available, and drop cleanup waits briefly for `cgroup.events` to report `populated 0` before removing the group.
 - `PreparedExecution::attach_child` attaches the future supervisor PID to the admitted cgroup before source release, while `PreparedExecution::kill_children` provides the parent-side cgroup-wide cancellation hook.
 - `PreparedExecution::release_source` returns a `ChildLaunchPermit` only after a non-zero child PID has been attached; the future supervisor must hold this permit before writing source or starting the runtime.
+- `PreparedExecution::launch_spec` returns a typed per-execution handoff containing the private workspace, an existing runtime root, and the child-only isolation configuration. It does not fork, exec, release source, or claim that the isolation controls have already run.
 - Missing cgroup v2 support or an unwritable controller causes `SandboxError::Isolation`; it never silently falls back to an unrestricted execution.
 - On supported Linux targets, the Python adapter uses a distinct process group and kills same-group descendants on timeout and leader exit before reaping the leader. This is best-effort process cleanup, not a containment boundary; a descendant may escape the group.
 - With `CORTEXENV_ENABLE_LINUX_SANDBOX=true`, Python is launched through bubblewrap with user/mount/PID/network/IPC/UTS namespaces, a read-only sandbox root and system-library binds, private 16 MiB `/tmp` and 64 MiB `/workspace` tmpfs mounts, and dropped capabilities. A benign conditional test checks namespace identities, capability state, mount/workspace behavior, and separation from a host loopback listener.
@@ -39,11 +40,12 @@ The placeholder dependency has been replaced with upstream `seccompiler` 0.5. Th
 
 1. Validate the request and create a private execution workspace.
 2. Create the cgroup and write the CPU, memory, swap, and PID limits.
-3. Spawn the dedicated child supervisor.
-4. In the child, create user/mount/PID/network/UTS/IPC namespaces and map an unprivileged UID/GID.
-5. Mount a minimal read-only root with a writable temporary workspace.
-6. Set `PR_SET_NO_NEW_PRIVS`, apply the runtime-specific seccomp-BPF profile, and drop capabilities.
-7. Attach the child PID to `cgroup.procs` before starting the runtime.
-8. Supervise output, deadline, exit status, and cleanup from the parent.
+3. Build a validated `ChildLaunchSpec` for the runtime root, workspace, and isolation configuration.
+4. Spawn the dedicated child supervisor.
+5. In the child, create user/mount/PID/network/UTS/IPC namespaces and map an unprivileged UID/GID.
+6. Mount a minimal read-only root with a writable temporary workspace.
+7. Set `PR_SET_NO_NEW_PRIVS`, apply the runtime-specific seccomp-BPF profile, and drop capabilities.
+8. Attach the child PID to `cgroup.procs` before starting the runtime.
+9. Supervise output, deadline, exit status, and cleanup from the parent.
 
 The optional Python bubblewrap path implements part of the namespace/mount sequence only; it is not enabled by default and is not a general supervisor. Runtime-specific seccomp profiles, the complete filesystem policy, deployment-environment verification, and child supervisors for WASM/JavaScript remain pending in `TODO.md`. Until those controls are validated together, do not treat CortexEnv as a hostile-code security boundary.
