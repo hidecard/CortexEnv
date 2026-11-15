@@ -268,3 +268,10 @@ Continue with these documents before integrating CortexEnv into another service:
 - [`linux-isolation.md`](linux-isolation.md) — current isolation boundary and supervisor sequence.
 - [`security-testing.md`](security-testing.md) — safe checks and blocked hostile-code tests.
 - [`product-scope-and-threat-model.md`](product-scope-and-threat-model.md) — supported workloads and security claims.
+
+## Troubleshooting checklist
+
+- If `cargo test --workspace` fails while compiling dependencies, rerun it after confirming the stable Rust toolchain is active with `rustc --version`.
+- If the API does not start, check that port `8080` is free or set `CORTEXENV_BIND` to another local address.
+- If Python namespace execution fails, verify that `bubblewrap` is installed and that the host permits unprivileged user namespaces. The runtime intentionally does not fall back to unrestricted execution.
+- If a restricted or production-oriented mode refuses to start, that is expected until the complete Linux child supervisor is wired into the runtime path.
