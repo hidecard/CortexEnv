@@ -400,3 +400,15 @@ The [Linux isolation boundary](docs/linux-isolation.md) documents the implemente
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
+
+## Contributing
+
+Contributions are welcome, especially improvements to runtime adapters, resource controls, security evidence, and documentation. Before opening a pull request:
+
+1. Read the relevant design and security notes in `docs/`.
+2. Keep changes scoped to one behavior or documentation topic.
+3. Run `cargo fmt --all -- --check` and `cargo test --workspace` locally.
+4. For runtime or isolation changes, also run the applicable smoke test from `scripts/` and explain any environment-dependent skip.
+5. Describe the user-visible behavior, security boundary, and tests in the pull request body.
+
+Please do not describe the current runtime as a complete hostile-code sandbox. Isolation controls are still under development; proposals that strengthen the fail-closed boundary and add reproducible evidence are especially useful.
